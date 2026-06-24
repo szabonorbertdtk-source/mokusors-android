@@ -253,27 +253,23 @@ private fun TaskCard(
                     color = Color(0xFF34C759), modifier = Modifier.padding(start = 32.dp))
             }
 
-            if (!isDone && (isOwner || isAdmin)) {
+            if (!isDone && isOwner) {
                 Row(
                     modifier = Modifier.padding(start = 32.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (isOwner) {
-                        OutlinedButton(
-                            onClick = onMarkDone,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34C759)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) { Text("Kész", fontSize = 13.sp) }
-                    }
-                    if (isAdmin) {
-                        OutlinedButton(
-                            onClick = onMarkIrrelevant,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E8E93)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) { Text("Nem releváns", fontSize = 13.sp) }
-                    }
+                    OutlinedButton(
+                        onClick = onMarkDone,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34C759)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) { Text("Kész", fontSize = 13.sp) }
+                    OutlinedButton(
+                        onClick = onMarkIrrelevant,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E8E93)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) { Text("Nem releváns", fontSize = 13.sp) }
                 }
             }
         }
