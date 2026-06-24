@@ -1,6 +1,5 @@
 package hu.szabonorbert.mokusors.ui.event
 
-import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -25,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import hu.szabonorbert.mokusors.model.CalendarEvent
+import hu.szabonorbert.mokusors.model.EventAttachment
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.ui.calendar.AppCard
 import hu.szabonorbert.mokusors.ui.calendar.statusColor
@@ -178,13 +178,26 @@ fun EventDetailScreen(
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 }
 
-                if (liveEvent.pdfUrl.isNotBlank()) {
+                if (liveEvent.pdfUrl.isNotBlank() && liveEvent.attachments.isEmpty()) {
                     MenuRow(
                         icon = Icons.Default.Description,
                         title = "PDF meghívó",
                         trailingIcon = Icons.Default.OpenInNew
                     ) {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(liveEvent.pdfUrl)))
+                    }
+                }
+
+                if (liveEvent.attachments.isNotEmpty()) {
+                    AppCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Csatolmányok", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            liveEvent.attachments.forEach { att ->
+                                AttachmentRow(att) {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(att.url)))
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -221,6 +234,47 @@ fun EventDetailScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AttachmentRow(att: EventAttachment, onClick: () -> Unit) {
+    val labelColor = when {
+        att.fileType == "application/pdf" -> Color(0xFFFF3B30)
+        "word" in att.fileType -> Color(0xFF007AFF)
+        "excel" in att.fileType || "spreadsheet" in att.fileType -> Color(0xFF34C759)
+        "powerpoint" in att.fileType || "presentation" in att.fileType -> Color(0xFFFF9500)
+        else -> Color(0xFF8E8E93)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(labelColor.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(att.label, fontSize = 10.sp, fontWeight = FontWeight.Black, color = labelColor)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(att.originalName.ifBlank { "Csatolmány" },
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text("Letöltés / megnyitás", fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Default.OpenInNew, null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp))
     }
 }
 

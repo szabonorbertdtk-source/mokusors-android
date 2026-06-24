@@ -2,6 +2,20 @@ package hu.szabonorbert.mokusors.model
 
 import java.util.Date
 
+data class EventAttachment(
+    val url: String,
+    val originalName: String,
+    val fileType: String
+) {
+    val label: String get() = when {
+        fileType == "application/pdf" -> "PDF"
+        "word" in fileType -> "DOC"
+        "excel" in fileType || "spreadsheet" in fileType -> "XLS"
+        "powerpoint" in fileType || "presentation" in fileType -> "PPT"
+        else -> "FILE"
+    }
+}
+
 data class CalendarEvent(
     val id: String = "",
     val firestoreID: String = "",
@@ -24,6 +38,7 @@ data class CalendarEvent(
     val activities: List<String> = emptyList(),
     val vacationPeople: List<String> = emptyList(),
     val pdfUrl: String = "",
+    val attachments: List<EventAttachment> = emptyList(),
     val sourceCollection: String = "events"
 ) {
     val isVacation get() = eventType == EventType.VACATION

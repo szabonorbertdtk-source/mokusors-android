@@ -5,6 +5,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import hu.szabonorbert.mokusors.model.CalendarEvent
+import hu.szabonorbert.mokusors.model.EventAttachment
 import hu.szabonorbert.mokusors.model.EventType
 import java.util.Date
 
@@ -278,6 +279,16 @@ class EventRepository {
             activities = (data["activities"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
             vacationPeople = (data["vacationPeople"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
             pdfUrl = data["pdfName"] as? String ?: data["pdfFileName"] as? String ?: "",
+            attachments = (data["attachments"] as? List<*>)?.mapNotNull { item ->
+                val d = item as? Map<*, *> ?: return@mapNotNull null
+                val url = d["url"] as? String ?: return@mapNotNull null
+                if (url.isEmpty()) return@mapNotNull null
+                EventAttachment(
+                    url = url,
+                    originalName = d["originalName"] as? String ?: "",
+                    fileType = d["fileType"] as? String ?: ""
+                )
+            } ?: emptyList(),
             sourceCollection = "events"
         )
     }
