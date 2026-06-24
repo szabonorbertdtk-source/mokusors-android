@@ -92,8 +92,10 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     fun markDone(task: TaskItem) {
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
             .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
+        val displayName = FirebaseAuth.getInstance().currentUser?.displayName
+            ?.takeIf { it.isNotBlank() } ?: userEmail
         FirebaseFirestore.getInstance().collection("deadlineTasks").document(task.id)
-            .update(mapOf("status" to "done", "completedAt" to now, "completedBy" to userEmail))
+            .update(mapOf("status" to "done", "completedAt" to now, "completedBy" to displayName))
     }
 
     fun markIrrelevant(task: TaskItem) {

@@ -32,7 +32,8 @@ import kotlin.coroutines.resume
 data class PhotoFolder(
     val id: String,
     val title: String,
-    val href: String
+    val href: String,
+    val modifiedTime: String = ""
 )
 
 private val fallbackFolders = listOf(
@@ -77,7 +78,8 @@ fun PhotosScreen(onBack: () -> Unit) {
                         PhotoFolder(
                             id = obj.optString("id", "$i"),
                             title = obj.optString("name", obj.optString("title", "Névtelen mappa")),
-                            href = obj.optString("webViewLink", obj.optString("href", ""))
+                            href = obj.optString("webViewLink", obj.optString("href", "")),
+                            modifiedTime = obj.optString("modifiedTime", "")
                         )
                     }
                 } else null
@@ -128,12 +130,26 @@ fun PhotosScreen(onBack: () -> Unit) {
                         ) {
                             Icon(Icons.Default.Photo, null, tint = teal, modifier = Modifier.size(22.dp))
                         }
-                        Text(
-                            folder.title.ifEmpty { "Névtelen mappa" },
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                folder.title.ifEmpty { "Névtelen mappa" },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            if (folder.modifiedTime.isNotBlank()) {
+                                val formatted = remember(folder.modifiedTime) {
+                                    try {
+                                        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+                                        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                                        val d = sdf.parse(folder.modifiedTime)
+                                        if (d != null) java.text.SimpleDateFormat("yyyy. MM. dd.", java.util.Locale("hu")).format(d)
+                                        else folder.modifiedTime
+                                    } catch (_: Exception) { folder.modifiedTime }
+                                }
+                                Text("Frissítve: $formatted", fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                         if (folder.href.isNotBlank()) {
                             Icon(Icons.Default.OpenInNew, null, tint = teal, modifier = Modifier.size(18.dp))
                         }

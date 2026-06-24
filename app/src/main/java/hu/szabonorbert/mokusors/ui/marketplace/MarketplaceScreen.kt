@@ -184,6 +184,19 @@ private fun OfferCard(offer: TeacherOffer, purple: Color) {
                 if (offer.receivingInstitution.isNotBlank()) {
                     Text("→ ${offer.receivingInstitution}", fontSize = 13.sp, color = purple)
                 }
+                if (offer.status.isNotBlank() && offer.status != "active") {
+                    val statusLabel = when (offer.status) {
+                        "filled" -> "Betöltve"
+                        "expired" -> "Lejárt"
+                        "inactive" -> "Inaktív"
+                        else -> offer.status
+                    }
+                    Box(Modifier.clip(RoundedCornerShape(50))
+                        .background(Color(0xFF8E8E93).copy(alpha = 0.15f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)) {
+                        Text(statusLabel, fontSize = 11.sp, color = Color(0xFF8E8E93), fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
         }
     }

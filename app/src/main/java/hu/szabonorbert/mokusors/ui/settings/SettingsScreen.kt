@@ -1,9 +1,12 @@
 package hu.szabonorbert.mokusors.ui.settings
 
 import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -30,7 +33,8 @@ data class NotifPrefs(
     val institutionalEvents: Boolean = true,
     val deadlineTasks: Boolean = true,
     val documents: Boolean = true,
-    val photos: Boolean = true
+    val photos: Boolean = true,
+    val inventory: Boolean = true
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,6 +42,8 @@ data class NotifPrefs(
 fun SettingsScreen(
     authViewModel: AuthViewModel,
     isAdmin: Boolean,
+    darkModeOverride: Int = -1,
+    onDarkModeChange: (Int) -> Unit = {},
     onBack: () -> Unit
 ) {
     val auth = FirebaseAuth.getInstance()
@@ -74,7 +80,8 @@ fun SettingsScreen(
                     institutionalEvents = d["institutionalEvents"] as? Boolean ?: true,
                     deadlineTasks = d["deadlineTasks"] as? Boolean ?: true,
                     documents = d["documents"] as? Boolean ?: true,
-                    photos = d["photos"] as? Boolean ?: true
+                    photos = d["photos"] as? Boolean ?: true,
+                    inventory = d["inventory"] as? Boolean ?: true
                 )
             }
     }
@@ -88,7 +95,8 @@ fun SettingsScreen(
                 "resumes" to prefs.resumes, "marketplace" to prefs.marketplace,
                 "institutionalEvents" to prefs.institutionalEvents,
                 "deadlineTasks" to prefs.deadlineTasks,
-                "documents" to prefs.documents, "photos" to prefs.photos
+                "documents" to prefs.documents, "photos" to prefs.photos,
+                "inventory" to prefs.inventory
             ))
     }
 
@@ -108,6 +116,30 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Appearance section
+            SettingsSection(title = "Megjelenítés") {
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Megjelenés", fontSize = 15.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(-1 to "Auto", 0 to "Világos", 1 to "Sötét").forEach { (value, label) ->
+                            val selected = darkModeOverride == value
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { onDarkModeChange(value) }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(label, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Account section
             SettingsSection(title = "Fiók") {
                 LabeledItem(label = "E-mail", value = userEmail)
@@ -193,6 +225,9 @@ fun SettingsScreen(
                 }
                 NotifToggle("Média", notifPrefs.photos) {
                     notifPrefs = notifPrefs.copy(photos = it); saveNotifPrefs(notifPrefs)
+                }
+                NotifToggle("Leltár", notifPrefs.inventory) {
+                    notifPrefs = notifPrefs.copy(inventory = it); saveNotifPrefs(notifPrefs)
                 }
             }
 

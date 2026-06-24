@@ -1,6 +1,7 @@
 package hu.szabonorbert.mokusors
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -8,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -47,8 +49,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestNotificationPermission()
         setContent {
-            MokusorsTheme {
+            val prefs = remember { getSharedPreferences("widget_prefs", Context.MODE_PRIVATE) }
+            val systemDark = isSystemInDarkTheme()
+            var darkModeOverride by remember { mutableStateOf(prefs.getInt("dark_mode_override", -1)) }
+            val isDarkTheme = when (darkModeOverride) {
+                0 -> false
+                1 -> true
+                else -> systemDark
+            }
+            MokusorsTheme(darkTheme = isDarkTheme) {
                 MokusorsApp(
+                    isDarkMode = isDarkTheme,
+                    darkModeOverride = darkModeOverride,
+                    onDarkModeChange = { override ->
+                        darkModeOverride = override
+                        prefs.edit().putInt("dark_mode_override", override).apply()
+                    },
                     onRoleResolved = { isAdmin ->
                         AppNotificationManager.start(this, isAdmin)
                         MokusorsFirebaseMessagingService.registerToken(this)
@@ -75,7 +91,12 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MokusorsApp(onRoleResolved: (Boolean) -> Unit = { _ -> }) {
+fun MokusorsApp(
+    isDarkMode: Boolean = false,
+    darkModeOverride: Int = -1,
+    onDarkModeChange: (Int) -> Unit = {},
+    onRoleResolved: (Boolean) -> Unit = { _ -> }
+) {
     val authViewModel: AuthViewModel = viewModel()
     val eventViewModel: EventViewModel = viewModel()
     val authState by authViewModel.authState.collectAsState()
@@ -140,8 +161,13 @@ fun MokusorsApp(onRoleResolved: (Boolean) -> Unit = { _ -> }) {
                     }
                 }
                 composable("settings") {
-                    SettingsScreen(authViewModel = authViewModel, isAdmin = isAdmin,
-                        onBack = { navController.popBackStack() })
+                    SettingsScreen(
+                        authViewModel = authViewModel,
+                        isAdmin = isAdmin,
+                        darkModeOverride = darkModeOverride,
+                        onDarkModeChange = onDarkModeChange,
+                        onBack = { navController.popBackStack() }
+                    )
                 }
                 composable("tasks") {
                     TasksScreen(isAdmin = isAdmin) { navController.popBackStack() }

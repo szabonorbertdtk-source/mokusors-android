@@ -89,6 +89,26 @@ fun CalendarScreen(
 
     LaunchedEffect(Unit) { eventViewModel.startListening() }
 
+    // Non-admin stat counters
+    var openDataSheetsCount by remember { mutableIntStateOf(0) }
+    var availableProgramsCount by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(isAdmin) {
+        if (isAdmin) return@DisposableEffect onDispose {}
+        val db = FirebaseFirestore.getInstance()
+        val r1 = db.collection("dataSheets").addSnapshotListener { snap, _ ->
+            openDataSheetsCount = snap?.documents?.count { doc ->
+                doc.getString("status") == "open"
+            } ?: 0
+        }
+        val r2 = db.collection("registrationEvents").addSnapshotListener { snap, _ ->
+            availableProgramsCount = snap?.documents?.count { doc ->
+                doc.getBoolean("deleted") != true
+            } ?: 0
+        }
+        onDispose { r1.remove(); r2.remove() }
+    }
+
     val now = Date()
     val selectedDayEvents = remember(events, selectedDate) { eventViewModel.eventsForDay(selectedDate) }
     val redCount = remember(events) {
@@ -187,6 +207,25 @@ fun CalendarScreen(
             )
         }
 
+        if (!isAdmin) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    UserStatCard(
+                        value = "$openDataSheetsCount",
+                        label = "Nyitott adatszolgáltatás",
+                        color = Color(0xFF007AFF),
+                        modifier = Modifier.weight(1f)
+                    )
+                    UserStatCard(
+                        value = "$availableProgramsCount",
+                        label = "Elérhető program",
+                        color = Color(0xFF34C759),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
         if (isAdmin && widgetShowEvents.value) {
             item {
                 StatusCardsRow(
@@ -223,6 +262,31 @@ fun CalendarScreen(
         }
     }
     } // end Scaffold
+}
+
+// ── User stat cards (non-admin) ───────────────────────────────────────────────
+
+@Composable
+private fun UserStatCard(value: String, label: String, color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(vertical = 16.dp, horizontal = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(value, fontSize = 32.sp, fontWeight = FontWeight.Black, color = color)
+            Text(
+                label, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
 }
 
 // ── Menu bar ──────────────────────────────────────────────────────────────────
