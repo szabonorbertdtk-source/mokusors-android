@@ -1,9 +1,11 @@
 package hu.szabonorbert.mokusors.ui.calendar
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,11 +17,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import hu.szabonorbert.mokusors.model.CalendarEvent
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.ui.theme.AppColors
@@ -39,6 +45,7 @@ private val hungarianHolidays = setOf(
 )
 private val weekHeaders = listOf("H","K","Sze","Cs","P","Szo","V")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreen(
     eventViewModel: EventViewModel,
@@ -60,6 +67,22 @@ fun CalendarScreen(
     val isLoading by eventViewModel.isLoading.collectAsState()
     val menuSettings by eventViewModel.menuSettings.collectAsState()
     val appColors = LocalAppColors.current
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE) }
+    val widgetShowEvents = remember { mutableStateOf(prefs.getBoolean("widgetShowEvents", true)) }
+    val widgetShowTasks = remember { mutableStateOf(prefs.getBoolean("widgetShowTasks", true)) }
+
+    // Refresh widget prefs when screen is composed (in case Settings changed them)
+    LaunchedEffect(Unit) {
+        widgetShowEvents.value = prefs.getBoolean("widgetShowEvents", true)
+        widgetShowTasks.value = prefs.getBoolean("widgetShowTasks", true)
+    }
+
+    // Sheet state for filtered events (status card click)
+    var filteredSheetTitle by remember { mutableStateOf("") }
+    var filteredSheetEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showFilteredSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { eventViewModel.startListening() }
 
@@ -102,19 +125,42 @@ fun CalendarScreen(
         return
     }
 
-    Scaffold(
-        floatingActionButton = {
-            if (isAdmin) {
-                FloatingActionButton(
-                    onClick = onAddEventClick,
-                    containerColor = appColors.statusBlue
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Új esemény",
-                        tint = androidx.compose.ui.graphics.Color.White)
+    if (showFilteredSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showFilteredSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+                Text(filteredSheetTitle, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                    modifier = Modifier.padding(bottom = 12.dp))
+                if (filteredSheetEvents.isEmpty()) {
+                    Text("Nincs ilyen esemény.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    filteredSheetEvents.forEach { ev ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { showFilteredSheet = false; onEventClick(ev) }
+                                .padding(vertical = 10.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(Modifier.size(10.dp).clip(CircleShape)
+                                .background(statusColor(ev, appColors)))
+                            Column {
+                                Text(ev.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                Text(dayHeaderFmt.format(ev.date), fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                    }
                 }
             }
         }
-    ) { scaffoldPadding ->
+    }
+
+    Scaffold { scaffoldPadding ->
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .padding(scaffoldPadding),
@@ -138,8 +184,23 @@ fun CalendarScreen(
             )
         }
 
-        if (isAdmin) {
-            item { StatusCardsRow(redCount, yellowCount, greenCount) }
+        if (isAdmin && widgetShowEvents.value) {
+            item {
+                StatusCardsRow(
+                    red = redCount, yellow = yellowCount, green = greenCount,
+                    events = events, now = now,
+                    onAddEventClick = onAddEventClick,
+                    onCardClick = { title, evList ->
+                        filteredSheetTitle = title
+                        filteredSheetEvents = evList
+                        showFilteredSheet = true
+                    }
+                )
+            }
+        }
+
+        if (isAdmin && widgetShowTasks.value) {
+            item { WidgetTodayTasksCard() }
         }
 
         item {
@@ -216,18 +277,68 @@ private fun MenuBtn(icon: ImageVector, label: String, color: Color, modifier: Mo
 // ── Status cards ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun StatusCardsRow(red: Int, yellow: Int, green: Int) {
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StatusCardsRow(
+    red: Int, yellow: Int, green: Int,
+    events: List<CalendarEvent>,
+    now: Date,
+    onAddEventClick: () -> Unit,
+    onCardClick: (String, List<CalendarEvent>) -> Unit
+) {
     val c = LocalAppColors.current
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StatusCard("Engedélyezésre\nvár", red, c.statusRed, Modifier.weight(1f))
-        StatusCard("KK\nengedélyre vár", yellow, c.statusYellow, Modifier.weight(1f))
-        StatusCard("KK által\nengedélyezve", green, c.statusGreen, Modifier.weight(1f))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusCard(
+                title = "Engedélyezésre\nvár", count = red, color = c.statusRed,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onCardClick("Engedélyezésre vár", events.filter {
+                        !it.isVacation && it.hasTodoList && it.date > now &&
+                        it.activeActivities.contains("kk") && !it.kkPermissionDone &&
+                        !(it.activeActivities.contains("dtk") && it.dtkParticipationDone)
+                    })
+                }
+            )
+            StatusCard(
+                title = "KK\nengedélyre vár", count = yellow, color = c.statusYellow,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onCardClick("KK engedélyezésre vár", events.filter {
+                        !it.isVacation && it.hasTodoList && it.date > now &&
+                        it.activeActivities.contains("kk") && !it.kkPermissionDone &&
+                        it.activeActivities.contains("dtk") && it.dtkParticipationDone
+                    })
+                }
+            )
+            StatusCard(
+                title = "KK által\nengedélyezve", count = green, color = c.statusGreen,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onCardClick("KK által engedélyezve", events.filter {
+                        !it.isVacation && it.hasTodoList && it.date > now &&
+                        it.activeActivities.contains("kk") && it.kkPermissionDone
+                    })
+                }
+            )
+        }
+        Button(
+            onClick = onAddEventClick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = c.statusBlue)
+        ) {
+            Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Új esemény", fontWeight = FontWeight.Bold)
+        }
     }
 }
 
 @Composable
-private fun StatusCard(title: String, count: Int, color: Color, modifier: Modifier) {
-    Box(modifier = modifier.clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.10f))) {
+private fun StatusCard(title: String, count: Int, color: Color, modifier: Modifier, onClick: () -> Unit = {}) {
+    Box(modifier = modifier.clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.10f))
+        .clickable(onClick = onClick)) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
             Text(title.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color, lineHeight = 12.sp)
             Text(count.toString(), fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -486,6 +597,83 @@ fun AppCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -
             .background(MaterialTheme.colorScheme.surface)
             .padding(14.dp)
     ) { Column(content = content) }
+}
+
+// ── Widget: today's deadline tasks ────────────────────────────────────────────
+
+private data class SimpleTask(val id: String, val title: String, val owner: String, val status: String)
+
+@Composable
+private fun WidgetTodayTasksCard() {
+    val orange = Color(0xFFFF9500)
+    val userEmail = remember { FirebaseAuth.getInstance().currentUser?.email?.lowercase() ?: "" }
+    var tasks by remember { mutableStateOf<List<SimpleTask>>(emptyList()) }
+
+    DisposableEffect(userEmail) {
+        if (userEmail.isBlank()) return@DisposableEffect onDispose {}
+        val today = Calendar.getInstance()
+        val day = today.get(Calendar.DAY_OF_MONTH)
+        val month = today.get(Calendar.MONTH) + 1
+        val year = today.get(Calendar.YEAR)
+
+        val reg: ListenerRegistration = FirebaseFirestore.getInstance()
+            .collection("deadlineTasks")
+            .whereEqualTo("reminderTargetEmail", userEmail)
+            .addSnapshotListener { snap, _ ->
+                tasks = (snap?.documents ?: emptyList()).mapNotNull { doc ->
+                    val d = doc.data ?: return@mapNotNull null
+                    val status = d["status"] as? String ?: "progress"
+                    if (status == "done" || status == "irrelevant") return@mapNotNull null
+                    val taskDay = (d["day"] as? Long)?.toInt() ?: return@mapNotNull null
+                    val taskMonth = (d["month"] as? Long)?.toInt() ?: return@mapNotNull null
+                    val taskYear = (d["year"] as? Long)?.toInt() ?: return@mapNotNull null
+                    if (taskDay != day || taskMonth != month || taskYear != year) return@mapNotNull null
+                    SimpleTask(
+                        id = doc.id,
+                        title = d["title"] as? String ?: "",
+                        owner = d["owner"] as? String ?: "",
+                        status = status
+                    )
+                }
+            }
+        onDispose { reg.remove() }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(orange.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("HATÁRIDŐS FELADAT · MA", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                color = orange)
+            if (tasks.isEmpty()) {
+                Text("Nincs mai határidős feladat", fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp))
+            } else {
+                tasks.forEach { task ->
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            Modifier.padding(top = 5.dp).size(6.dp).clip(CircleShape).background(orange)
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(task.title.ifEmpty { "Névtelen feladat" },
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            if (task.owner.isNotBlank()) {
+                                Text(task.owner, fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

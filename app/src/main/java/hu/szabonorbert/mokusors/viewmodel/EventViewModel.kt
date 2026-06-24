@@ -85,13 +85,14 @@ class EventViewModel : ViewModel() {
                     )
                 }
         } else {
+            // Admin: derive menu visibility from notification preferences
             menuListener = db.collection("users").document(uid)
-                .collection("settings").document("menu")
+                .collection("settings").document("notifications")
                 .addSnapshotListener { snap, _ ->
                     val d = snap?.data ?: emptyMap<String, Any>()
                     _menuSettings.value = MenuSettings(
-                        tasks = d["tasks"] as? Boolean ?: true,
-                        registrations = d["registrations"] as? Boolean ?: true,
+                        tasks = d["deadlineTasks"] as? Boolean ?: true,
+                        registrations = d["programs"] as? Boolean ?: true,
                         dataSheets = d["dataSheets"] as? Boolean ?: true,
                         marketplace = d["marketplace"] as? Boolean ?: true,
                         resumes = d["resumes"] as? Boolean ?: true,
