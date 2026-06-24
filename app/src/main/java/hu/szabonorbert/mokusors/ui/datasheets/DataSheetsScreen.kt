@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -172,31 +171,42 @@ fun DataSheetsScreen(onBack: () -> Unit) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Sheet picker (horizontal scroll)
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(sheets) { sheet ->
-                        val isSelected = sheet.id == (selectedSheet?.id)
-                        val isOpen = sheet.status == "open"
-                        val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (isSelected) accentColor else accentColor.copy(alpha = 0.08f))
-                                .border(
-                                    width = if (isSelected) 0.dp else 1.dp,
-                                    color = accentColor.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(14.dp)
-                                )
-                                .clickable {
-                                    selectedSheetId = sheet.id
-                                    ownValues = emptyMap()
-                                    savedMessage = ""
-                                    errorMsg = ""
-                                }
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+            // Sheet picker — vertical cards (iOS style)
+            items(sheets) { sheet ->
+                val isSelected = sheet.id == (selectedSheet?.id)
+                val isOpen = sheet.status == "open"
+                val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
+                val statusLabel = if (isOpen) "Nyitott" else "Lezárt"
+                val statusColor = if (isOpen) Color(0xFF34C759) else Color(0xFF8E8E93)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(
+                            width = if (isSelected) 2.dp else 0.dp,
+                            color = if (isSelected) blue else Color.Transparent,
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .clickable {
+                            selectedSheetId = sheet.id
+                            ownValues = emptyMap()
+                            savedMessage = ""
+                            errorMsg = ""
+                        }
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -204,25 +214,48 @@ fun DataSheetsScreen(onBack: () -> Unit) {
                             ) {
                                 Text(
                                     sheet.title,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isSelected) Color.White else accentColor
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
+                                if (sheet.multiRow) {
+                                    Box(
+                                        Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(Color(0xFF5856D6))
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Több sor", fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                }
                                 if (!isOpen) {
-                                    Icon(
-                                        Icons.Default.Lock,
-                                        null,
-                                        tint = if (isSelected) Color.White.copy(alpha = 0.8f) else accentColor.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(12.dp)
-                                    )
+                                    Icon(Icons.Default.Lock, null,
+                                        tint = Color(0xFF8E8E93),
+                                        modifier = Modifier.size(14.dp))
                                 }
                             }
+                            if (sheet.deadline.isNotBlank()) {
+                                Text("Határidő: ${sheet.deadline}", fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
+                        Text(
+                            statusLabel,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = statusColor
+                        )
                     }
                 }
             }
 
-            // Sheet form
+            // Divider between picker and form
+            if (selectedSheet != null) {
+                item { Spacer(Modifier.height(4.dp)) }
+            }
+
+            // Sheet form for selected sheet
             selectedSheet?.let { sheet ->
                 item {
                     SheetFormCard(

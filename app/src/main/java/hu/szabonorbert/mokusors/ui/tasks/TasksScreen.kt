@@ -31,6 +31,7 @@ data class TaskItem(
     val title: String,
     val deadlineDate: Date,
     val owner: String,
+    val reminderTargetEmail: String,
     val status: String,
     val note: String,
     val completedBy: String
@@ -76,6 +77,7 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         title = d["title"] as? String ?: "",
                         deadlineDate = deadlineDate,
                         owner = d["owner"] as? String ?: "",
+                        reminderTargetEmail = d["reminderTargetEmail"] as? String ?: "",
                         status = status,
                         note = d["note"] as? String ?: "",
                         completedBy = d["completedBy"] as? String ?: ""
@@ -174,7 +176,8 @@ private fun TaskCard(
     onMarkIrrelevant: () -> Unit
 ) {
     val isDone = task.status == "done"
-    val canAct = isAdmin || task.owner.equals(userEmail, ignoreCase = true)
+    val isOwner = task.owner.equals(userEmail, ignoreCase = true) ||
+        task.reminderTargetEmail.equals(userEmail, ignoreCase = true)
 
     Box(
         modifier = Modifier
@@ -218,17 +221,19 @@ private fun TaskCard(
                     color = Color(0xFF34C759), modifier = Modifier.padding(start = 32.dp))
             }
 
-            if (!isDone && canAct) {
+            if (!isDone && (isOwner || isAdmin)) {
                 Row(
                     modifier = Modifier.padding(start = 32.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onMarkDone,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34C759)),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                    ) { Text("Kész", fontSize = 13.sp) }
+                    if (isOwner) {
+                        OutlinedButton(
+                            onClick = onMarkDone,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34C759)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text("Kész", fontSize = 13.sp) }
+                    }
                     if (isAdmin) {
                         OutlinedButton(
                             onClick = onMarkIrrelevant,

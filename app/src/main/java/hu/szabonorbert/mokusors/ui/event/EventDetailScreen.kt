@@ -59,7 +59,6 @@ fun EventDetailScreen(
     val color = statusColor(liveEvent, appColors)
 
     var showDeleteDialog by remember { mutableStateOf(false) }
-    var showDuplicateDialog by remember { mutableStateOf(false) }
 
     // Delete confirmation dialog
     if (showDeleteDialog) {
@@ -80,15 +79,6 @@ fun EventDetailScreen(
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) { Text("Mégse") }
             }
-        )
-    }
-
-    // Duplicate dialog
-    if (showDuplicateDialog) {
-        DuplicateDialog(
-            event = liveEvent,
-            eventViewModel = eventViewModel,
-            onDismiss = { showDuplicateDialog = false }
         )
     }
 
@@ -214,14 +204,6 @@ fun EventDetailScreen(
                         onEditEvent(liveEvent)
                     }
 
-                    MenuRow(
-                        icon = Icons.Default.ContentCopy,
-                        title = "Duplikálás",
-                        trailingIcon = Icons.Default.ChevronRight
-                    ) {
-                        showDuplicateDialog = true
-                    }
-
                     Spacer(Modifier.height(4.dp))
 
                     Button(
@@ -240,80 +222,6 @@ fun EventDetailScreen(
             }
         }
     }
-}
-
-@Composable
-private fun DuplicateDialog(
-    event: CalendarEvent,
-    eventViewModel: EventViewModel,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val calendar = remember { Calendar.getInstance().apply { time = event.date } }
-    var selectedDate by remember { mutableStateOf(event.date) }
-    val dateFmt = remember { SimpleDateFormat("yyyy. MM. dd.", Locale("hu")) }
-    var isSaving by remember { mutableStateOf(false) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Duplikálás") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Válassz dátumot az új eseményhez:")
-                OutlinedButton(
-                    onClick = {
-                        val cal = Calendar.getInstance().apply { time = selectedDate }
-                        DatePickerDialog(
-                            context,
-                            { _, y, m, d ->
-                                selectedDate = Calendar.getInstance().apply {
-                                    set(y, m, d,
-                                        cal.get(Calendar.HOUR_OF_DAY),
-                                        cal.get(Calendar.MINUTE), 0)
-                                    set(Calendar.MILLISECOND, 0)
-                                }.time
-                            },
-                            cal.get(Calendar.YEAR),
-                            cal.get(Calendar.MONTH),
-                            cal.get(Calendar.DAY_OF_MONTH)
-                        ).show()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.CalendarMonth, contentDescription = null,
-                        modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(dateFmt.format(selectedDate))
-                }
-                if (errorMsg != null) {
-                    Text(errorMsg!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                }
-                if (isSaving) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = !isSaving,
-                onClick = {
-                    isSaving = true
-                    eventViewModel.duplicateEvent(
-                        event = event,
-                        newDate = selectedDate,
-                        onSuccess = { onDismiss() },
-                        onError = { msg -> isSaving = false; errorMsg = msg }
-                    )
-                }
-            ) {
-                Text("Duplikálás")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Mégse") }
-        }
-    )
 }
 
 @Composable

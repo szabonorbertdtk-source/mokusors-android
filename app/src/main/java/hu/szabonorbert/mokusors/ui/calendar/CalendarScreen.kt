@@ -15,12 +15,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -540,7 +542,10 @@ private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (Calen
             if (events.isEmpty()) {
                 Text("Ezen a héten nincs esemény.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
             } else {
-                events.forEach { EventRow(it, onEventClick, true, appColors) }
+                val now = remember { Date() }
+                events.forEach { event ->
+                    EventRow(event, onEventClick, true, appColors, isPast = event.date.before(now))
+                }
             }
         }
     }
@@ -551,12 +556,14 @@ private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (Calen
 @Composable
 fun EventRow(
     event: CalendarEvent, onEventClick: (CalendarEvent) -> Unit,
-    isAdmin: Boolean, appColors: AppColors, compact: Boolean = false
+    isAdmin: Boolean, appColors: AppColors, compact: Boolean = false,
+    isPast: Boolean = false
 ) {
-    val color = statusColor(event, appColors)
+    val color = if (isPast) Color(0xFF8E8E93) else statusColor(event, appColors)
     val bgAlpha = if (event.isVacation) 0.10f else 0.08f
     Box(
         modifier = Modifier.fillMaxWidth()
+            .alpha(if (isPast) 0.45f else 1.0f)
             .clip(RoundedCornerShape(16.dp))
             .background(color.copy(alpha = bgAlpha))
             .clickable { onEventClick(event) }
@@ -566,7 +573,8 @@ fun EventRow(
             Box(Modifier.size(11.dp).clip(CircleShape).background(color))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(event.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textDecoration = if (isPast) TextDecoration.LineThrough else TextDecoration.None)
                 if (!event.isVacation && !compact) {
                     Text(timeFmt.format(event.date), fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
