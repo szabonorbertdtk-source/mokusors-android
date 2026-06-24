@@ -108,14 +108,12 @@ fun DocumentsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     }
 
     val isLoading = !foldersLoaded || !docsLoaded
-    val unfolderedDocs = docs.filter { doc ->
-        doc.folderId == null || folders.none { it.id == doc.folderId }
-    }
+    val unfolderedDocs = docs.filter { doc -> doc.folderId == null }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Dokumentumok", fontWeight = FontWeight.SemiBold) },
+                title = { Text("Backoffice", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
             )
         }

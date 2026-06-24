@@ -98,7 +98,8 @@ fun CalendarScreen(
         val db = FirebaseFirestore.getInstance()
         val r1 = db.collection("dataSheets").addSnapshotListener { snap, _ ->
             openDataSheetsCount = snap?.documents?.count { doc ->
-                doc.getString("status") == "open"
+                doc.getBoolean("deleted") != true &&
+                (doc.getString("status")?.lowercase() ?: "open") == "open"
             } ?: 0
         }
         val r2 = db.collection("registrationEvents").addSnapshotListener { snap, _ ->

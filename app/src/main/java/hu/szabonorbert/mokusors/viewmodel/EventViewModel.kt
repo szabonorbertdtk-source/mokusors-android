@@ -97,7 +97,7 @@ class EventViewModel : ViewModel() {
                         marketplace = d["marketplace"] as? Boolean ?: true,
                         resumes = d["resumes"] as? Boolean ?: true,
                         photos = d["photos"] as? Boolean ?: true,
-                        documents = d["documents"] as? Boolean ?: false,
+                        documents = d["documents"] as? Boolean ?: true,
                         inventory = d["inventory"] as? Boolean ?: true
                     )
                 }
