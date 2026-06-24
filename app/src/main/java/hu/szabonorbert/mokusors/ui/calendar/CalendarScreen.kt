@@ -277,7 +277,6 @@ private fun MenuBtn(icon: ImageVector, label: String, color: Color, modifier: Mo
 
 // ── Status cards ──────────────────────────────────────────────────────────────
 
-@Composable
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StatusCardsRow(
