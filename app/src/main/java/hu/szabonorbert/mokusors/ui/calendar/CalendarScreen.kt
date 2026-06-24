@@ -492,7 +492,7 @@ fun AppCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -
 
 fun statusColor(event: CalendarEvent, appColors: AppColors): Color {
     if (event.isVacation) return appColors.statusPurple
-    if (!event.hasTodoList) return appColors.statusBlue
+    if (!event.hasTodoList) return if (event.visibleToUsers) appColors.statusBlue else appColors.statusGray
     val hasKK = event.activeActivities.contains("kk")
     val hasDTK = event.activeActivities.contains("dtk")
     if (!hasKK && !hasDTK) return appColors.statusBlue

@@ -44,11 +44,12 @@ data class AppColors(
     val statusYellow: Color,
     val statusGreen: Color,
     val statusPurple: Color,
-    val statusBlue: Color
+    val statusBlue: Color,
+    val statusGray: Color
 )
 
 val LocalAppColors = staticCompositionLocalOf {
-    AppColors(StatusRed, StatusYellow, StatusGreen, StatusPurple, Blue)
+    AppColors(StatusRed, StatusYellow, StatusGreen, StatusPurple, Blue, StatusGray)
 }
 
 @Composable
@@ -57,7 +58,7 @@ fun MokusorsTheme(
     content: @Composable () -> Unit
 ) {
     CompositionLocalProvider(
-        LocalAppColors provides AppColors(StatusRed, StatusYellow, StatusGreen, StatusPurple, Blue)
+        LocalAppColors provides AppColors(StatusRed, StatusYellow, StatusGreen, StatusPurple, Blue, StatusGray)
     ) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,

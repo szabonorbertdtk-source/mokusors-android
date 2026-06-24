@@ -10,6 +10,7 @@ val StatusRed = Color(0xFFFF3B30)
 val StatusYellow = Color(0xFFFFCC00)
 val StatusGreen = Color(0xFF34C759)
 val StatusPurple = Color(0xFFAF52DE)
+val StatusGray = Color(0xFF8E8E93)
 
 val CardLight = Color(0xFFFFFFFF)
 val CardDark = Color(0xFF1C1C1E)
