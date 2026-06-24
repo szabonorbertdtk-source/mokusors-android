@@ -334,8 +334,8 @@ private fun ChecklistCard(event: CalendarEvent, eventViewModel: EventViewModel) 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
             .padding(16.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -408,7 +408,7 @@ private fun MenuRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .background(LocalAppColors.current.statusBlue.copy(alpha = 0.10f))
+            .background(LocalAppColors.current.statusBlue.copy(alpha = 0.14f))
             .clickable(onClick = onClick)
             .padding(16.dp)
     ) {

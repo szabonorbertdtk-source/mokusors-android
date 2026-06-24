@@ -421,7 +421,7 @@ private fun InventoryCard(
 
     if (showDeleteConfirm) {
         BasicAlertDialog(onDismissRequest = { showDeleteConfirm = false }) {
-            Card(shape = RoundedCornerShape(16.dp)) {
+            Card(shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(0.dp)) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("Törlés", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Text("Biztosan törölni szeretnéd a(z) ${item.title} eszközt?")
@@ -455,7 +455,7 @@ private fun InventoryFormDialog(
     val conditionOptions = listOf("új", "jó", "használt")
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(shape = RoundedCornerShape(20.dp)) {
+        Card(shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(0.dp)) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)

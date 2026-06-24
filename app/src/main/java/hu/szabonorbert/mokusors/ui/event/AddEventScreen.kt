@@ -141,7 +141,9 @@ fun AddEventScreen(
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
+                    ),
+                    elevation = CardDefaults.cardElevation(0.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
                         errorMsg!!,

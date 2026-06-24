@@ -2,6 +2,7 @@ package hu.szabonorbert.mokusors.ui.calendar
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -337,8 +338,12 @@ private fun StatusCardsRow(
 
 @Composable
 private fun StatusCard(title: String, count: Int, color: Color, modifier: Modifier, onClick: () -> Unit = {}) {
-    Box(modifier = modifier.clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.10f))
-        .clickable(onClick = onClick)) {
+    Box(modifier = modifier
+        .clip(RoundedCornerShape(16.dp))
+        .background(color.copy(alpha = 0.10f))
+        .border(1.dp, color.copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+        .clickable(onClick = onClick)
+    ) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
             Text(title.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color, lineHeight = 12.sp)
             Text(count.toString(), fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -550,37 +555,40 @@ fun EventRow(
     isAdmin: Boolean, appColors: AppColors, compact: Boolean = false
 ) {
     val color = statusColor(event, appColors)
+    val bgAlpha = if (event.isVacation) 0.10f else 0.08f
     Box(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(color.copy(alpha = 0.08f))
+            .background(color.copy(alpha = bgAlpha))
             .clickable { onEventClick(event) }
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(color))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(event.title, fontWeight = FontWeight.Bold, fontSize = 17.sp,
+            Box(Modifier.size(11.dp).clip(CircleShape).background(color))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(event.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (!event.isVacation && !compact) {
-                    Text(timeFmt.format(event.date), fontSize = 13.sp,
+                    Text(timeFmt.format(event.date), fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (event.location.isNotBlank()) {
-                    Text(event.location, fontSize = 13.sp,
+                    Text(event.location, fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
                 if (isAdmin && !compact) {
-                    if (event.hasTodoList) Text("${event.completedTaskCount}/${event.totalTaskCount} kész", fontSize = 13.sp, color = color)
-                    else Text("Nincs teendőlista", fontSize = 13.sp, color = appColors.statusBlue)
+                    if (event.hasTodoList) {
+                        Text("${event.completedTaskCount}/${event.totalTaskCount} kész",
+                            fontSize = 13.sp, color = color)
+                    }
                     if (event.visibleToUsers) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF30B0C7).copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Color(0xFF30B0C7).copy(alpha = 0.12f))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
-                            Text("Intézmény", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF30B0C7))
+                            Text("Intézmény", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF30B0C7))
                         }
                     }
                 }
