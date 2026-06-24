@@ -1,5 +1,6 @@
 package hu.szabonorbert.mokusors.ui.settings
 
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -42,6 +44,11 @@ fun SettingsScreen(
     val db = FirebaseFirestore.getInstance()
     val uid = auth.currentUser?.uid ?: ""
     val userEmail = auth.currentUser?.email ?: ""
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE) }
+
+    var widgetShowEvents by remember { mutableStateOf(prefs.getBoolean("widgetShowEvents", true)) }
+    var widgetShowTasks by remember { mutableStateOf(prefs.getBoolean("widgetShowTasks", true)) }
 
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
@@ -189,9 +196,23 @@ fun SettingsScreen(
                 }
             }
 
+            // Widget preferences (admin only)
+            if (isAdmin) {
+                SettingsSection(title = "Widget") {
+                    NotifToggle("Esemény", widgetShowEvents) {
+                        widgetShowEvents = it
+                        prefs.edit().putBoolean("widgetShowEvents", it).apply()
+                    }
+                    NotifToggle("Határidős feladat", widgetShowTasks) {
+                        widgetShowTasks = it
+                        prefs.edit().putBoolean("widgetShowTasks", it).apply()
+                    }
+                }
+            }
+
             // App info
             SettingsSection(title = "Alkalmazás") {
-                LabeledItem(label = "Verzió", value = "1.0")
+                LabeledItem(label = "Verzió", value = "1.5")
             }
 
             Spacer(Modifier.height(4.dp))

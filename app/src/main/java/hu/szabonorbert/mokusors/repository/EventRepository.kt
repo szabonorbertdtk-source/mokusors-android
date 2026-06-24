@@ -244,6 +244,7 @@ class EventRepository {
     }
 
     private fun parseEvent(data: Map<String, Any>, docId: String): CalendarEvent? {
+        if (data["deleted"] as? Boolean == true) return null
         val title = data["title"] as? String ?: return null
 
         val startDate = (data["startsAt"] as? com.google.firebase.Timestamp)?.toDate()

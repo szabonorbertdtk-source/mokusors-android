@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 data class DataSheetField(
     val id: String,
@@ -196,12 +198,25 @@ fun DataSheetsScreen(onBack: () -> Unit) {
                                 }
                                 .padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Text(
-                                sheet.title,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isSelected) Color.White else accentColor
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    sheet.title,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isSelected) Color.White else accentColor
+                                )
+                                if (!isOpen) {
+                                    Icon(
+                                        Icons.Default.Lock,
+                                        null,
+                                        tint = if (isSelected) Color.White.copy(alpha = 0.8f) else accentColor.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -246,6 +261,16 @@ private fun SheetFormCard(
     val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
     val hasSavedData = ownValues.values.any { it.isNotBlank() }
 
+    val deadlineDaysLeft = remember(sheet.deadline) {
+        if (sheet.deadline.isBlank()) null
+        else try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val deadline = fmt.parse(sheet.deadline) ?: return@remember null
+            val diff = deadline.time - System.currentTimeMillis()
+            TimeUnit.MILLISECONDS.toDays(diff)
+        } catch (_: Exception) { null }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -260,31 +285,66 @@ private fun SheetFormCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                            modifier = Modifier.weight(1f, fill = false))
+                        // Status badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(accentColor.copy(alpha = 0.12f))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                if (isOpen) "Nyitott" else "Lezárt",
+                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor
+                            )
+                        }
+                    }
                     if (sheet.description.isNotBlank()) {
                         Text(sheet.description, fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (sheet.deadline.isNotBlank()) {
-                        Text("Határidő: ${sheet.deadline}", fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium, color = accentColor)
+                        val deadlineText = when {
+                            deadlineDaysLeft == null -> "Határidő: ${sheet.deadline}"
+                            deadlineDaysLeft < 0 -> "Határidő lejárt"
+                            deadlineDaysLeft == 0L -> "Ma a határidő"
+                            deadlineDaysLeft == 1L -> "Holnap a határidő"
+                            else -> "Határidő: ${sheet.deadline} (${deadlineDaysLeft} nap)"
+                        }
+                        val deadlineColor = when {
+                            deadlineDaysLeft == null || !isOpen -> accentColor
+                            deadlineDaysLeft <= 3 -> Color(0xFFFF3B30)
+                            deadlineDaysLeft <= 7 -> Color(0xFFFF9500)
+                            else -> accentColor
+                        }
+                        Text(deadlineText, fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium, color = deadlineColor)
                     }
                 }
                 if (hasSavedData) {
+                    Spacer(Modifier.width(8.dp))
                     Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF34C759),
                         modifier = Modifier.size(22.dp).padding(top = 2.dp))
                 }
             }
 
             if (!isOpen) {
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF8E8E93).copy(alpha = 0.12f))
-                        .padding(10.dp)
+                        .background(Color(0xFF8E8E93).copy(alpha = 0.10f))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Icon(Icons.Default.Lock, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(15.dp))
                     Text("Ez az adatszolgáltatás lezárva.", fontSize = 13.sp,
                         color = Color(0xFF8E8E93), fontWeight = FontWeight.Medium)
                 }
