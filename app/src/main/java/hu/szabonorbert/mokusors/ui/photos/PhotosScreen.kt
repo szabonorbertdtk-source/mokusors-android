@@ -22,9 +22,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import kotlin.coroutines.resume
 
 data class PhotoFolder(
     val id: String,
@@ -51,11 +54,19 @@ fun PhotosScreen(onBack: () -> Unit) {
 
     LaunchedEffect(Unit) {
         try {
+            val idToken = suspendCancellableCoroutine<String?> { cont ->
+                val user = FirebaseAuth.getInstance().currentUser
+                if (user == null) { cont.resume(null); return@suspendCancellableCoroutine }
+                user.getIdToken(false)
+                    .addOnSuccessListener { cont.resume(it.token) }
+                    .addOnFailureListener { cont.resume(null) }
+            }
             val loaded = withContext(Dispatchers.IO) {
                 val url = java.net.URL("https://mokusors-admin.vercel.app/api/drive-folders")
                 val conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 5000
+                if (idToken != null) conn.setRequestProperty("Authorization", "Bearer $idToken")
                 val text = conn.inputStream.bufferedReader().readText()
                 conn.disconnect()
                 val json = JSONObject(text)

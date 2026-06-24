@@ -32,15 +32,12 @@ import java.util.*
 private val monthTitleFmt = SimpleDateFormat("yyyy. MMMM", Locale("hu"))
 private val dayHeaderFmt = SimpleDateFormat("yyyy.MM.dd. EEEE", Locale("hu"))
 private val timeFmt = SimpleDateFormat("HH:mm", Locale("hu"))
-private val weekDayNameFmt = SimpleDateFormat("EEEE", Locale("hu"))
-private val shortDateFmt = SimpleDateFormat("MMM d.", Locale("hu"))
 private val holidayFmt = SimpleDateFormat("MM-dd", Locale.US)
 
 private val hungarianHolidays = setOf(
     "01-01","03-15","05-01","08-20","10-23","11-01","12-24","12-25","12-26"
 )
 private val weekHeaders = listOf("H","K","Sze","Cs","P","Szo","V")
-enum class CalViewMode { MONTH, WEEK }
 
 @Composable
 fun CalendarScreen(
@@ -63,15 +60,31 @@ fun CalendarScreen(
     val isLoading by eventViewModel.isLoading.collectAsState()
     val menuSettings by eventViewModel.menuSettings.collectAsState()
     val appColors = LocalAppColors.current
-    var viewMode by remember { mutableStateOf(CalViewMode.MONTH) }
 
     LaunchedEffect(Unit) { eventViewModel.startListening() }
 
     val now = Date()
     val selectedDayEvents = remember(events, selectedDate) { eventViewModel.eventsForDay(selectedDate) }
-    val redCount = events.count { !it.isVacation && it.hasTodoList && it.date > now && !it.dtkParticipationDone }
-    val yellowCount = events.count { !it.isVacation && it.hasTodoList && it.date > now && it.dtkParticipationDone && !it.kkPermissionDone }
-    val greenCount = events.count { !it.isVacation && it.hasTodoList && it.date > now && it.kkPermissionDone }
+    val redCount = remember(events) {
+        events.count { ev ->
+            !ev.isVacation && ev.hasTodoList && ev.date > now &&
+            ev.activeActivities.contains("kk") && !ev.kkPermissionDone &&
+            !(ev.activeActivities.contains("dtk") && ev.dtkParticipationDone)
+        }
+    }
+    val yellowCount = remember(events) {
+        events.count { ev ->
+            !ev.isVacation && ev.hasTodoList && ev.date > now &&
+            ev.activeActivities.contains("kk") && !ev.kkPermissionDone &&
+            ev.activeActivities.contains("dtk") && ev.dtkParticipationDone
+        }
+    }
+    val greenCount = remember(events) {
+        events.count { ev ->
+            !ev.isVacation && ev.hasTodoList && ev.date > now &&
+            ev.activeActivities.contains("kk") && ev.kkPermissionDone
+        }
+    }
     val thisWeekEvents = remember(events) {
         val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY }
         cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
@@ -133,8 +146,6 @@ fun CalendarScreen(
             CalendarCard(
                 events = events,
                 selectedDate = selectedDate,
-                viewMode = viewMode,
-                onViewModeChange = { viewMode = it },
                 onDateSelected = { eventViewModel.selectDate(it) },
                 onEventClick = onEventClick,
                 selectedDayEvents = selectedDayEvents,
@@ -179,10 +190,10 @@ private fun MenuBar(
                 MenuBtn(Icons.Default.Article, "Önéletrajz", Color(0xFFFF9500), Modifier.weight(1f), onResumesClick)
             if (menu.photos)
                 MenuBtn(Icons.Default.Photo, "Média", Color(0xFF30B0C7), Modifier.weight(1f), onPhotosClick)
-            if (menu.documents)
-                MenuBtn(Icons.Default.Folder, "Backoffice", Color(0xFF5856D6), Modifier.weight(1f), onDocumentsClick)
             if (menu.inventory)
                 MenuBtn(Icons.Default.Inventory2, "Leltár", Color(0xFF34C759), Modifier.weight(1f), onInventoryClick)
+            if (menu.documents)
+                MenuBtn(Icons.Default.Folder, "Backoffice", Color(0xFF5856D6), Modifier.weight(1f), onDocumentsClick)
             MenuBtn(Icons.Default.Settings, "Beállítások", Color(0xFF8E8E93), Modifier.weight(1f), onSettingsClick)
         }
     }
@@ -230,8 +241,6 @@ private fun StatusCard(title: String, count: Int, color: Color, modifier: Modifi
 private fun CalendarCard(
     events: List<CalendarEvent>,
     selectedDate: Date,
-    viewMode: CalViewMode,
-    onViewModeChange: (CalViewMode) -> Unit,
     onDateSelected: (Date) -> Unit,
     onEventClick: (CalendarEvent) -> Unit,
     selectedDayEvents: List<CalendarEvent>,
@@ -243,8 +252,7 @@ private fun CalendarCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
                     val cal = Calendar.getInstance().apply { time = selectedDate }
-                    if (viewMode == CalViewMode.MONTH) cal.add(Calendar.MONTH, -1)
-                    else cal.add(Calendar.DAY_OF_YEAR, -7)
+                    cal.add(Calendar.MONTH, -1)
                     onDateSelected(cal.time)
                 }) { Icon(Icons.Default.ChevronLeft, null, tint = appColors.statusBlue) }
                 Text(
@@ -255,32 +263,14 @@ private fun CalendarCard(
                 )
                 IconButton(onClick = {
                     val cal = Calendar.getInstance().apply { time = selectedDate }
-                    if (viewMode == CalViewMode.MONTH) cal.add(Calendar.MONTH, 1)
-                    else cal.add(Calendar.DAY_OF_YEAR, 7)
+                    cal.add(Calendar.MONTH, 1)
                     onDateSelected(cal.time)
                 }) { Icon(Icons.Default.ChevronRight, null, tint = appColors.statusBlue) }
             }
 
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                SegmentedButton(
-                    selected = viewMode == CalViewMode.MONTH,
-                    onClick = { onViewModeChange(CalViewMode.MONTH) },
-                    shape = SegmentedButtonDefaults.itemShape(0, 2)
-                ) { Text("Havi") }
-                SegmentedButton(
-                    selected = viewMode == CalViewMode.WEEK,
-                    onClick = { onViewModeChange(CalViewMode.WEEK) },
-                    shape = SegmentedButtonDefaults.itemShape(1, 2)
-                ) { Text("Heti") }
-            }
-
-            if (viewMode == CalViewMode.MONTH) {
-                MonthGrid(events, selectedDate, onDateSelected, appColors)
-                HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-                SelectedDayAgenda(selectedDate, selectedDayEvents, isAdmin, onEventClick, appColors)
-            } else {
-                WeekList(events, selectedDate, onDateSelected, onEventClick, appColors)
-            }
+            MonthGrid(events, selectedDate, onDateSelected, appColors)
+            HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+            SelectedDayAgenda(selectedDate, selectedDayEvents, isAdmin, onEventClick, appColors)
         }
     }
 }
@@ -414,71 +404,6 @@ private fun SelectedDayAgenda(
     }
 }
 
-// ── Week list ─────────────────────────────────────────────────────────────────
-
-@Composable
-private fun WeekList(
-    events: List<CalendarEvent>, selectedDate: Date,
-    onDateSelected: (Date) -> Unit, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors
-) {
-    val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY; time = selectedDate }
-    cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-    val monday = startOfDay(cal.time)
-    val weekDays = (0..6).map { i ->
-        Calendar.getInstance().apply { time = monday; add(Calendar.DAY_OF_YEAR, i) }.time
-    }
-    val today = startOfDay(Date())
-    val selectedDay = startOfDay(selectedDate)
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        weekDays.forEach { date ->
-            val dayEnd = Calendar.getInstance().apply {
-                time = date; set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59)
-            }.time
-            val dow = Calendar.getInstance().apply { time = date }.get(Calendar.DAY_OF_WEEK)
-            val isWeekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
-            val dayEvents = events.filter { event ->
-                if (event.isVacation && isWeekend) return@filter false
-                event.date <= dayEnd && event.endDate >= date
-            }.sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
-            val isSelected = date == selectedDay
-            val isHoliday = hungarianHolidays.contains(holidayFmt.format(date))
-
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(when {
-                        isSelected -> appColors.statusBlue.copy(alpha = 0.13f)
-                        isHoliday -> appColors.statusRed.copy(alpha = 0.08f)
-                        isWeekend -> Color(0xFF5856D6).copy(alpha = 0.08f)
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    })
-                    .clickable { onDateSelected(date) }
-                    .padding(12.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text(weekDayNameFmt.format(date).replaceFirstChar { it.uppercase() },
-                                fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            Text(shortDateFmt.format(date), fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (dayEvents.isEmpty()) {
-                            Text("Nincs esemény", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            Text("${dayEvents.size} esemény", fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold, color = appColors.statusBlue)
-                        }
-                    }
-                    dayEvents.forEach { EventRow(it, onEventClick, false, appColors, compact = true) }
-                }
-            }
-        }
-    }
-}
-
 // ── Weekly overview ───────────────────────────────────────────────────────────
 
 @Composable
@@ -568,8 +493,11 @@ fun AppCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -
 fun statusColor(event: CalendarEvent, appColors: AppColors): Color {
     if (event.isVacation) return appColors.statusPurple
     if (!event.hasTodoList) return appColors.statusBlue
+    val hasKK = event.activeActivities.contains("kk")
+    val hasDTK = event.activeActivities.contains("dtk")
+    if (!hasKK && !hasDTK) return appColors.statusBlue
     if (event.kkPermissionDone) return appColors.statusGreen
-    if (event.dtkParticipationDone) return appColors.statusYellow
+    if (hasDTK && event.dtkParticipationDone) return appColors.statusYellow
     return appColors.statusRed
 }
 
