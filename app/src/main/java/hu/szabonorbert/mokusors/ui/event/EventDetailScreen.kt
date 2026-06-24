@@ -134,6 +134,35 @@ fun EventDetailScreen(
                 Text(formatDate(liveEvent), fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+                val typeLabel = when (liveEvent.eventType) {
+                    EventType.GUEST -> "Vendég esemény"
+                    EventType.SPEECH -> "Köszöntőbeszéd"
+                    EventType.VACATION -> "Szabadság"
+                    EventType.NONE -> null
+                }
+                if (typeLabel != null || (isAdmin && liveEvent.visibleToUsers)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (typeLabel != null) {
+                            Box(
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                    .background(color.copy(alpha = 0.12f))
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(typeLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = color)
+                            }
+                        }
+                        if (isAdmin && liveEvent.visibleToUsers) {
+                            Box(
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF30B0C7).copy(alpha = 0.12f))
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text("Intézmény", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF30B0C7))
+                            }
+                        }
+                    }
+                }
+
                 if (isAdmin && liveEvent.hasTodoList && !liveEvent.isVacation) {
                     ChecklistCard(liveEvent, eventViewModel)
                 }
@@ -157,6 +186,16 @@ fun EventDetailScreen(
                 ) {
                     val url = buildGoogleCalUrl(liveEvent)
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }
+
+                if (liveEvent.pdfUrl.isNotBlank()) {
+                    MenuRow(
+                        icon = Icons.Default.Description,
+                        title = "PDF meghívó",
+                        trailingIcon = Icons.Default.OpenInNew
+                    ) {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(liveEvent.pdfUrl)))
+                    }
                 }
 
                 if (liveEvent.note.isNotBlank()) {

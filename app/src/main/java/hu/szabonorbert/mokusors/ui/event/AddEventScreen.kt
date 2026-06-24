@@ -23,7 +23,7 @@ import java.util.*
 private val dateDisplayFmt = SimpleDateFormat("yyyy. MM. dd.", Locale("hu"))
 private val timeDisplayFmt = SimpleDateFormat("HH:mm", Locale("hu"))
 
-private val vacationPeople = listOf("Laci", "Ivett", "Norbi", "Tündi", "Balázs")
+private val vacationPeople = listOf("Laci", "Ivett", "Tündi", "Balázs")
 
 private val activityKeys = listOf("dtk", "kk", "press", "ph", "catering", "gifts", "certificate")
 private val activityLabels = mapOf(

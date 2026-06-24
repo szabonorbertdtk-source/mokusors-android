@@ -1,6 +1,5 @@
 package hu.szabonorbert.mokusors.ui.calendar
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -166,42 +165,40 @@ private fun MenuBar(
     AppCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            if (isAdmin) {
-                if (menu.tasks)
-                    MenuBtn(Icons.Default.Checklist, "Feladatok", appColors.statusRed, onTasksClick)
-            }
+            if (isAdmin && menu.tasks)
+                MenuBtn(Icons.Default.Checklist, "Feladatok", appColors.statusRed, Modifier.weight(1f), onTasksClick)
             if (menu.registrations)
-                MenuBtn(Icons.Default.CalendarMonth, "Program", appColors.statusGreen, onProgramClick)
+                MenuBtn(Icons.Default.CalendarMonth, "Program", appColors.statusGreen, Modifier.weight(1f), onProgramClick)
             if (menu.dataSheets)
-                MenuBtn(Icons.Default.Description, "Adatszolg.", appColors.statusBlue, onDataSheetsClick)
+                MenuBtn(Icons.Default.Description, "Adatszolgáltatás", appColors.statusBlue, Modifier.weight(1f), onDataSheetsClick)
             if (menu.marketplace)
-                MenuBtn(Icons.Default.SwapHoriz, "Kereslet", Color(0xFFAF52DE), onMarketplaceClick)
+                MenuBtn(Icons.Default.SwapHoriz, "Kereslet-kínálat", Color(0xFFAF52DE), Modifier.weight(1f), onMarketplaceClick)
             if (menu.resumes)
-                MenuBtn(Icons.Default.Article, "Önéletrajz", Color(0xFFFF9500), onResumesClick)
+                MenuBtn(Icons.Default.Article, "Önéletrajz", Color(0xFFFF9500), Modifier.weight(1f), onResumesClick)
             if (menu.photos)
-                MenuBtn(Icons.Default.Photo, "Média", Color(0xFF30B0C7), onPhotosClick)
+                MenuBtn(Icons.Default.Photo, "Média", Color(0xFF30B0C7), Modifier.weight(1f), onPhotosClick)
             if (menu.documents)
-                MenuBtn(Icons.Default.Folder, "Dokumentumok", Color(0xFF5856D6), onDocumentsClick)
+                MenuBtn(Icons.Default.Folder, "Backoffice", Color(0xFF5856D6), Modifier.weight(1f), onDocumentsClick)
             if (menu.inventory)
-                MenuBtn(Icons.Default.Inventory2, "Leltár", Color(0xFF34C759), onInventoryClick)
-            MenuBtn(Icons.Default.Settings, "Beállítás", Color(0xFF8E8E93), onSettingsClick)
+                MenuBtn(Icons.Default.Inventory2, "Leltár", Color(0xFF34C759), Modifier.weight(1f), onInventoryClick)
+            MenuBtn(Icons.Default.Settings, "Beállítások", Color(0xFF8E8E93), Modifier.weight(1f), onSettingsClick)
         }
     }
 }
 
 @Composable
-private fun MenuBtn(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+private fun MenuBtn(icon: ImageVector, label: String, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
-        modifier = Modifier
-            .size(56.dp)
+        modifier = modifier
+            .height(42.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(color.copy(alpha = 0.10f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -318,11 +315,11 @@ private fun MonthGrid(
         Spacer(Modifier.height(4.dp))
         val rows = ((firstDow + daysInMonth) + 6) / 7
         for (row in 0 until rows) {
-            Row(Modifier.fillMaxWidth().height(46.dp)) {
+            Row(Modifier.fillMaxWidth()) {
                 for (col in 0 until 7) {
                     val idx = row * 7 + col
                     val dayNum = idx - firstDow + 1
-                    if (dayNum < 1 || dayNum > daysInMonth) { Box(Modifier.weight(1f)); continue }
+                    if (dayNum < 1 || dayNum > daysInMonth) { Box(Modifier.weight(1f).height(76.dp)); continue }
 
                     val cellDate = makeDate(year, month, dayNum, 0, 0, 0)
                     val cellEnd = makeDate(year, month, dayNum, 23, 59, 59)
@@ -338,37 +335,58 @@ private fun MonthGrid(
                     val blue = appColors.statusBlue
 
                     Box(
-                        modifier = Modifier.weight(1f).fillMaxHeight()
-                            .clip(CircleShape)
-                            .background(if (isSelected) blue else Color.Transparent)
-                            .clickable { onDateSelected(cellDate) },
-                        contentAlignment = Alignment.Center
+                        modifier = Modifier.weight(1f).height(76.dp)
+                            .background(when {
+                                isHoliday -> Color(0xFFFF3B30).copy(alpha = 0.06f)
+                                isWeekend -> Color(0xFF5856D6).copy(alpha = 0.04f)
+                                else -> Color.Transparent
+                            })
+                            .clickable { onDateSelected(cellDate) }
+                            .padding(horizontal = 2.dp, vertical = 3.dp)
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            if (isToday && !isSelected) {
-                                Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                                    Canvas(Modifier.size(30.dp)) {
-                                        drawCircle(color = blue, radius = size.minDimension / 2f - 2f,
-                                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
-                                    }
-                                    Text(dayNum.toString(), fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold, color = blue)
-                                }
-                            } else {
-                                Text(dayNum.toString(), fontSize = 14.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(when {
+                                        isToday -> blue
+                                        isSelected -> blue.copy(alpha = 0.15f)
+                                        else -> Color.Transparent
+                                    }),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    dayNum.toString(), fontSize = 12.sp,
+                                    fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = when {
-                                        isSelected -> Color.White
+                                        isToday -> Color.White
+                                        isSelected -> blue
                                         isHoliday -> appColors.statusRed
                                         isWeekend -> Color(0xFF5856D6)
                                         else -> MaterialTheme.colorScheme.onSurface
-                                    })
+                                    }
+                                )
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.height(5.dp)) {
-                                dayEvents.take(3).forEach { ev ->
-                                    Box(Modifier.size(4.dp).clip(CircleShape)
-                                        .background(if (isSelected) Color.White.copy(alpha = 0.85f) else statusColor(ev, appColors)))
-                                }
+                            dayEvents.take(3).forEach { ev ->
+                                Text(
+                                    ev.title,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = Color.White,
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(statusColor(ev, appColors))
+                                        .padding(horizontal = 2.dp, vertical = 1.dp)
+                                )
+                            }
+                            if (dayEvents.size > 3) {
+                                Text("+${dayEvents.size - 3} más", fontSize = 8.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -465,9 +483,20 @@ private fun WeekList(
 
 @Composable
 private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors) {
+    val weekRangeText = remember {
+        val fmt = SimpleDateFormat("yyyy. MMMM d.", Locale("hu"))
+        val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY; time = Date() }
+        cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        val monday = cal.time
+        cal.add(Calendar.DAY_OF_YEAR, 6)
+        "${fmt.format(monday)} – ${fmt.format(cal.time)}"
+    }
     AppCard {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Heti összesítő", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Heti összesítő", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(weekRangeText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (events.isEmpty()) {
                 Text("Ezen a héten nincs esemény.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
             } else {
@@ -477,9 +506,6 @@ private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (Calen
     }
 }
 
-// ── Next events ───────────────────────────────────────────────────────────────
-
-@Composable
 // ── Shared composables ────────────────────────────────────────────────────────
 
 @Composable
@@ -511,6 +537,16 @@ fun EventRow(
                 if (isAdmin && !compact) {
                     if (event.hasTodoList) Text("${event.completedTaskCount}/${event.totalTaskCount} kész", fontSize = 13.sp, color = color)
                     else Text("Nincs teendőlista", fontSize = 13.sp, color = appColors.statusBlue)
+                    if (event.visibleToUsers) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF30B0C7).copy(alpha = 0.15f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("Intézmény", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF30B0C7))
+                        }
+                    }
                 }
             }
         }

@@ -272,6 +272,7 @@ fun InventoryScreen(isAdmin: Boolean, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InventoryCard(
     item: InventoryItem,
@@ -419,19 +420,23 @@ private fun InventoryCard(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Törlés") },
-            text = { Text("Biztosan törölni szeretnéd a(z) „${item.title}" eszközt?") },
-            confirmButton = {
-                TextButton(onClick = { onDelete(); showDeleteConfirm = false }) {
-                    Text("Törlés", color = Color(0xFFFF3B30))
+        BasicAlertDialog(onDismissRequest = { showDeleteConfirm = false }) {
+            Card(shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Törlés", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Biztosan törölni szeretnéd a(z) ${item.title} eszközt?")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                    ) {
+                        TextButton(onClick = { showDeleteConfirm = false }) { Text("Mégse") }
+                        TextButton(onClick = { onDelete(); showDeleteConfirm = false }) {
+                            Text("Törlés", color = Color(0xFFFF3B30))
+                        }
+                    }
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Mégse") }
             }
-        )
+        }
     }
 }
 
