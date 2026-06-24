@@ -1,0 +1,548 @@
+package hu.szabonorbert.mokusors.ui.calendar
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import hu.szabonorbert.mokusors.model.CalendarEvent
+import hu.szabonorbert.mokusors.model.EventType
+import hu.szabonorbert.mokusors.ui.theme.AppColors
+import hu.szabonorbert.mokusors.ui.theme.LocalAppColors
+import hu.szabonorbert.mokusors.viewmodel.EventViewModel
+import hu.szabonorbert.mokusors.viewmodel.MenuSettings
+import java.text.SimpleDateFormat
+import java.util.*
+
+private val monthTitleFmt = SimpleDateFormat("yyyy. MMMM", Locale("hu"))
+private val dayHeaderFmt = SimpleDateFormat("yyyy.MM.dd. EEEE", Locale("hu"))
+private val timeFmt = SimpleDateFormat("HH:mm", Locale("hu"))
+private val weekDayNameFmt = SimpleDateFormat("EEEE", Locale("hu"))
+private val shortDateFmt = SimpleDateFormat("MMM d.", Locale("hu"))
+private val holidayFmt = SimpleDateFormat("MM-dd", Locale.US)
+
+private val hungarianHolidays = setOf(
+    "01-01","03-15","05-01","08-20","10-23","11-01","12-24","12-25","12-26"
+)
+private val weekHeaders = listOf("H","K","Sze","Cs","P","Szo","V")
+enum class CalViewMode { MONTH, WEEK }
+
+@Composable
+fun CalendarScreen(
+    eventViewModel: EventViewModel,
+    onEventClick: (CalendarEvent) -> Unit,
+    onSettingsClick: () -> Unit,
+    onTasksClick: () -> Unit = {},
+    onProgramClick: () -> Unit = {},
+    onDataSheetsClick: () -> Unit = {},
+    onMarketplaceClick: () -> Unit = {},
+    onResumesClick: () -> Unit = {},
+    onPhotosClick: () -> Unit = {},
+    onDocumentsClick: () -> Unit = {},
+    onInventoryClick: () -> Unit = {},
+    onAddEventClick: () -> Unit = {}
+) {
+    val events by eventViewModel.events.collectAsState()
+    val selectedDate by eventViewModel.selectedDate.collectAsState()
+    val isAdmin by eventViewModel.isAdmin.collectAsState()
+    val isLoading by eventViewModel.isLoading.collectAsState()
+    val menuSettings by eventViewModel.menuSettings.collectAsState()
+    val appColors = LocalAppColors.current
+    var viewMode by remember { mutableStateOf(CalViewMode.MONTH) }
+
+    LaunchedEffect(Unit) { eventViewModel.startListening() }
+
+    val now = Date()
+    val selectedDayEvents = remember(events, selectedDate) { eventViewModel.eventsForDay(selectedDate) }
+    val redCount = events.count { !it.isVacation && it.hasTodoList && it.date > now && !it.dtkParticipationDone }
+    val yellowCount = events.count { !it.isVacation && it.hasTodoList && it.date > now && it.dtkParticipationDone && !it.kkPermissionDone }
+    val greenCount = events.count { !it.isVacation && it.hasTodoList && it.date > now && it.kkPermissionDone }
+    val thisWeekEvents = remember(events) {
+        val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY }
+        cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+        val weekStart = cal.time
+        cal.add(Calendar.DAY_OF_YEAR, 6); cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59)
+        val weekEnd = cal.time
+        events.filter { !it.isVacation && it.date >= weekStart && it.date <= weekEnd }.sortedBy { it.date }
+    }
+
+    if (isLoading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = appColors.statusBlue)
+        }
+        return
+    }
+
+    Scaffold(
+        floatingActionButton = {
+            if (isAdmin) {
+                FloatingActionButton(
+                    onClick = onAddEventClick,
+                    containerColor = appColors.statusBlue
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Új esemény",
+                        tint = androidx.compose.ui.graphics.Color.White)
+                }
+            }
+        }
+    ) { scaffoldPadding ->
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .padding(scaffoldPadding),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            MenuBar(
+                isAdmin = isAdmin,
+                menu = menuSettings,
+                appColors = appColors,
+                onTasksClick = onTasksClick,
+                onProgramClick = onProgramClick,
+                onDataSheetsClick = onDataSheetsClick,
+                onMarketplaceClick = onMarketplaceClick,
+                onResumesClick = onResumesClick,
+                onPhotosClick = onPhotosClick,
+                onDocumentsClick = onDocumentsClick,
+                onInventoryClick = onInventoryClick,
+                onSettingsClick = onSettingsClick
+            )
+        }
+
+        if (isAdmin) {
+            item { StatusCardsRow(redCount, yellowCount, greenCount) }
+        }
+
+        item {
+            CalendarCard(
+                events = events,
+                selectedDate = selectedDate,
+                viewMode = viewMode,
+                onViewModeChange = { viewMode = it },
+                onDateSelected = { eventViewModel.selectDate(it) },
+                onEventClick = onEventClick,
+                selectedDayEvents = selectedDayEvents,
+                isAdmin = isAdmin,
+                appColors = appColors
+            )
+        }
+
+        if (isAdmin) {
+            item { WeeklyOverviewCard(thisWeekEvents, onEventClick, appColors) }
+        }
+    }
+    } // end Scaffold
+}
+
+// ── Menu bar ──────────────────────────────────────────────────────────────────
+
+@Composable
+private fun MenuBar(
+    isAdmin: Boolean,
+    menu: MenuSettings, appColors: AppColors,
+    onTasksClick: () -> Unit, onProgramClick: () -> Unit,
+    onDataSheetsClick: () -> Unit, onMarketplaceClick: () -> Unit,
+    onResumesClick: () -> Unit, onPhotosClick: () -> Unit,
+    onDocumentsClick: () -> Unit, onInventoryClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
+    AppCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            if (isAdmin) {
+                if (menu.tasks)
+                    MenuBtn(Icons.Default.Checklist, "Feladatok", appColors.statusRed, onTasksClick)
+            }
+            if (menu.registrations)
+                MenuBtn(Icons.Default.CalendarMonth, "Program", appColors.statusGreen, onProgramClick)
+            if (menu.dataSheets)
+                MenuBtn(Icons.Default.Description, "Adatszolg.", appColors.statusBlue, onDataSheetsClick)
+            if (menu.marketplace)
+                MenuBtn(Icons.Default.SwapHoriz, "Kereslet", Color(0xFFAF52DE), onMarketplaceClick)
+            if (menu.resumes)
+                MenuBtn(Icons.Default.Article, "Önéletrajz", Color(0xFFFF9500), onResumesClick)
+            if (menu.photos)
+                MenuBtn(Icons.Default.Photo, "Média", Color(0xFF30B0C7), onPhotosClick)
+            if (menu.documents)
+                MenuBtn(Icons.Default.Folder, "Dokumentumok", Color(0xFF5856D6), onDocumentsClick)
+            if (menu.inventory)
+                MenuBtn(Icons.Default.Inventory2, "Leltár", Color(0xFF34C759), onInventoryClick)
+            MenuBtn(Icons.Default.Settings, "Beállítás", Color(0xFF8E8E93), onSettingsClick)
+        }
+    }
+}
+
+@Composable
+private fun MenuBtn(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(color.copy(alpha = 0.10f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
+    }
+}
+
+// ── Status cards ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun StatusCardsRow(red: Int, yellow: Int, green: Int) {
+    val c = LocalAppColors.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusCard("Engedélyezésre\nvár", red, c.statusRed, Modifier.weight(1f))
+        StatusCard("KK\nengedélyre vár", yellow, c.statusYellow, Modifier.weight(1f))
+        StatusCard("KK által\nengedélyezve", green, c.statusGreen, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun StatusCard(title: String, count: Int, color: Color, modifier: Modifier) {
+    Box(modifier = modifier.clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.10f))) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
+            Text(title.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color, lineHeight = 12.sp)
+            Text(count.toString(), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ── Calendar card ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun CalendarCard(
+    events: List<CalendarEvent>,
+    selectedDate: Date,
+    viewMode: CalViewMode,
+    onViewModeChange: (CalViewMode) -> Unit,
+    onDateSelected: (Date) -> Unit,
+    onEventClick: (CalendarEvent) -> Unit,
+    selectedDayEvents: List<CalendarEvent>,
+    isAdmin: Boolean,
+    appColors: AppColors
+) {
+    AppCard {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    val cal = Calendar.getInstance().apply { time = selectedDate }
+                    if (viewMode == CalViewMode.MONTH) cal.add(Calendar.MONTH, -1)
+                    else cal.add(Calendar.DAY_OF_YEAR, -7)
+                    onDateSelected(cal.time)
+                }) { Icon(Icons.Default.ChevronLeft, null, tint = appColors.statusBlue) }
+                Text(
+                    text = monthTitleFmt.format(selectedDate),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    fontSize = 22.sp, fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = {
+                    val cal = Calendar.getInstance().apply { time = selectedDate }
+                    if (viewMode == CalViewMode.MONTH) cal.add(Calendar.MONTH, 1)
+                    else cal.add(Calendar.DAY_OF_YEAR, 7)
+                    onDateSelected(cal.time)
+                }) { Icon(Icons.Default.ChevronRight, null, tint = appColors.statusBlue) }
+            }
+
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = viewMode == CalViewMode.MONTH,
+                    onClick = { onViewModeChange(CalViewMode.MONTH) },
+                    shape = SegmentedButtonDefaults.itemShape(0, 2)
+                ) { Text("Havi") }
+                SegmentedButton(
+                    selected = viewMode == CalViewMode.WEEK,
+                    onClick = { onViewModeChange(CalViewMode.WEEK) },
+                    shape = SegmentedButtonDefaults.itemShape(1, 2)
+                ) { Text("Heti") }
+            }
+
+            if (viewMode == CalViewMode.MONTH) {
+                MonthGrid(events, selectedDate, onDateSelected, appColors)
+                HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                SelectedDayAgenda(selectedDate, selectedDayEvents, isAdmin, onEventClick, appColors)
+            } else {
+                WeekList(events, selectedDate, onDateSelected, onEventClick, appColors)
+            }
+        }
+    }
+}
+
+// ── Month grid ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun MonthGrid(
+    events: List<CalendarEvent>,
+    selectedDate: Date,
+    onDateSelected: (Date) -> Unit,
+    appColors: AppColors
+) {
+    val cal = Calendar.getInstance().apply { time = selectedDate }
+    val year = cal.get(Calendar.YEAR)
+    val month = cal.get(Calendar.MONTH)
+    cal.set(Calendar.DAY_OF_MONTH, 1)
+    val firstDow = (cal.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    val today = startOfDay(Date())
+    val selectedDay = startOfDay(selectedDate)
+
+    Column {
+        Row(Modifier.fillMaxWidth()) {
+            weekHeaders.forEach { h ->
+                Text(h, modifier = Modifier.weight(1f), textAlign = TextAlign.Center,
+                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        val rows = ((firstDow + daysInMonth) + 6) / 7
+        for (row in 0 until rows) {
+            Row(Modifier.fillMaxWidth().height(46.dp)) {
+                for (col in 0 until 7) {
+                    val idx = row * 7 + col
+                    val dayNum = idx - firstDow + 1
+                    if (dayNum < 1 || dayNum > daysInMonth) { Box(Modifier.weight(1f)); continue }
+
+                    val cellDate = makeDate(year, month, dayNum, 0, 0, 0)
+                    val cellEnd = makeDate(year, month, dayNum, 23, 59, 59)
+                    val dow = Calendar.getInstance().apply { time = cellDate }.get(Calendar.DAY_OF_WEEK)
+                    val isWeekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
+                    val dayEvents = events.filter { event ->
+                        if (event.isVacation && isWeekend) return@filter false
+                        event.date <= cellEnd && event.endDate >= cellDate
+                    }.sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
+                    val isSelected = cellDate == selectedDay
+                    val isToday = cellDate == today
+                    val isHoliday = hungarianHolidays.contains(holidayFmt.format(cellDate))
+                    val blue = appColors.statusBlue
+
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                            .clip(CircleShape)
+                            .background(if (isSelected) blue else Color.Transparent)
+                            .clickable { onDateSelected(cellDate) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (isToday && !isSelected) {
+                                Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                                    Canvas(Modifier.size(30.dp)) {
+                                        drawCircle(color = blue, radius = size.minDimension / 2f - 2f,
+                                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
+                                    }
+                                    Text(dayNum.toString(), fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold, color = blue)
+                                }
+                            } else {
+                                Text(dayNum.toString(), fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = when {
+                                        isSelected -> Color.White
+                                        isHoliday -> appColors.statusRed
+                                        isWeekend -> Color(0xFF5856D6)
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    })
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.height(5.dp)) {
+                                dayEvents.take(3).forEach { ev ->
+                                    Box(Modifier.size(4.dp).clip(CircleShape)
+                                        .background(if (isSelected) Color.White.copy(alpha = 0.85f) else statusColor(ev, appColors)))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Selected day agenda ───────────────────────────────────────────────────────
+
+@Composable
+private fun SelectedDayAgenda(
+    selectedDate: Date, events: List<CalendarEvent>,
+    isAdmin: Boolean, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors
+) {
+    Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(dayHeaderFmt.format(selectedDate), fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (events.isEmpty()) {
+            Text("Nincs esemény erre a napra.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+        } else {
+            events.forEach { EventRow(it, onEventClick, isAdmin, appColors) }
+        }
+    }
+}
+
+// ── Week list ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun WeekList(
+    events: List<CalendarEvent>, selectedDate: Date,
+    onDateSelected: (Date) -> Unit, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors
+) {
+    val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY; time = selectedDate }
+    cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+    val monday = startOfDay(cal.time)
+    val weekDays = (0..6).map { i ->
+        Calendar.getInstance().apply { time = monday; add(Calendar.DAY_OF_YEAR, i) }.time
+    }
+    val today = startOfDay(Date())
+    val selectedDay = startOfDay(selectedDate)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        weekDays.forEach { date ->
+            val dayEnd = Calendar.getInstance().apply {
+                time = date; set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59)
+            }.time
+            val dow = Calendar.getInstance().apply { time = date }.get(Calendar.DAY_OF_WEEK)
+            val isWeekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
+            val dayEvents = events.filter { event ->
+                if (event.isVacation && isWeekend) return@filter false
+                event.date <= dayEnd && event.endDate >= date
+            }.sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
+            val isSelected = date == selectedDay
+            val isHoliday = hungarianHolidays.contains(holidayFmt.format(date))
+
+            Box(
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(when {
+                        isSelected -> appColors.statusBlue.copy(alpha = 0.13f)
+                        isHoliday -> appColors.statusRed.copy(alpha = 0.08f)
+                        isWeekend -> Color(0xFF5856D6).copy(alpha = 0.08f)
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    })
+                    .clickable { onDateSelected(date) }
+                    .padding(12.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(weekDayNameFmt.format(date).replaceFirstChar { it.uppercase() },
+                                fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text(shortDateFmt.format(date), fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (dayEvents.isEmpty()) {
+                            Text("Nincs esemény", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            Text("${dayEvents.size} esemény", fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold, color = appColors.statusBlue)
+                        }
+                    }
+                    dayEvents.forEach { EventRow(it, onEventClick, false, appColors, compact = true) }
+                }
+            }
+        }
+    }
+}
+
+// ── Weekly overview ───────────────────────────────────────────────────────────
+
+@Composable
+private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors) {
+    AppCard {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Heti összesítő", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            if (events.isEmpty()) {
+                Text("Ezen a héten nincs esemény.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+            } else {
+                events.forEach { EventRow(it, onEventClick, true, appColors) }
+            }
+        }
+    }
+}
+
+// ── Next events ───────────────────────────────────────────────────────────────
+
+@Composable
+// ── Shared composables ────────────────────────────────────────────────────────
+
+@Composable
+fun EventRow(
+    event: CalendarEvent, onEventClick: (CalendarEvent) -> Unit,
+    isAdmin: Boolean, appColors: AppColors, compact: Boolean = false
+) {
+    val color = statusColor(event, appColors)
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(color.copy(alpha = 0.08f))
+            .clickable { onEventClick(event) }
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(event.title, fontWeight = FontWeight.Bold, fontSize = 17.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (!event.isVacation && !compact) {
+                    Text(timeFmt.format(event.date), fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (event.location.isNotBlank()) {
+                    Text(event.location, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+                if (isAdmin && !compact) {
+                    if (event.hasTodoList) Text("${event.completedTaskCount}/${event.totalTaskCount} kész", fontSize = 13.sp, color = color)
+                    else Text("Nincs teendőlista", fontSize = 13.sp, color = appColors.statusBlue)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Box(
+        modifier = modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp)
+    ) { Column(content = content) }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fun statusColor(event: CalendarEvent, appColors: AppColors): Color {
+    if (event.isVacation) return appColors.statusPurple
+    if (!event.hasTodoList) return appColors.statusBlue
+    if (event.kkPermissionDone) return appColors.statusGreen
+    if (event.dtkParticipationDone) return appColors.statusYellow
+    return appColors.statusRed
+}
+
+private fun startOfDay(date: Date) = Calendar.getInstance().apply {
+    time = date; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+}.time
+
+private fun makeDate(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int) =
+    Calendar.getInstance().apply { set(year, month, day, h, m, s); set(Calendar.MILLISECOND, 0) }.time
+
+private val CalendarEvent.isVacation get() = eventType == EventType.VACATION

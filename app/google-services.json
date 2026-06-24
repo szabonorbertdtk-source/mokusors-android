@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "210005503711",
+    "project_id": "mokusors-6e67c",
+    "storage_bucket": "mokusors-6e67c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:210005503711:android:4ef0dfbbdfb21bf20c436a",
+        "android_client_info": {
+          "package_name": "hu.szabonorbert.mokusors"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC42Wvccfll5cxOG5iOVCeuOmYRbc9VqU0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
