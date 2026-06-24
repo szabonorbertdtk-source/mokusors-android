@@ -281,6 +281,7 @@ private fun AttachmentRow(att: EventAttachment, onClick: () -> Unit) {
 @Composable
 private fun ChecklistCard(event: CalendarEvent, eventViewModel: EventViewModel) {
     val appColors = LocalAppColors.current
+    val context = LocalContext.current
     val allItems = listOf(
         Triple("dtk", "DTK részvétel", event.dtkParticipationDone),
         Triple("kk", "KK engedély", event.kkPermissionDone),
@@ -322,7 +323,6 @@ private fun ChecklistCard(event: CalendarEvent, eventViewModel: EventViewModel) 
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .clickable {
-                            // Toggle this item
                             val newDtk = if (key == "dtk") !isDone else event.dtkParticipationDone
                             val newKk = if (key == "kk") !isDone else event.kkPermissionDone
                             val newPress = if (key == "press") !isDone else event.pressInviteDone
@@ -340,6 +340,27 @@ private fun ChecklistCard(event: CalendarEvent, eventViewModel: EventViewModel) 
                                 giftsDone = newGifts,
                                 certificateDone = newCertificate
                             )
+                            // Fire local notification when item is marked done
+                            if (!isDone) {
+                                val channelId = "mokusors_general"
+                                val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+                                    as android.app.NotificationManager
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    manager.createNotificationChannel(
+                                        android.app.NotificationChannel(
+                                            channelId, "Mókusörs értesítések",
+                                            android.app.NotificationManager.IMPORTANCE_DEFAULT
+                                        )
+                                    )
+                                }
+                                val notif = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                                    .setSmallIcon(hu.szabonorbert.mokusors.R.drawable.ic_launcher_foreground)
+                                    .setContentTitle("Feladat kész ✓")
+                                    .setContentText("$title – ${event.title}")
+                                    .setAutoCancel(true)
+                                    .build()
+                                manager.notify(System.currentTimeMillis().toInt(), notif)
+                            }
                         }
                         .padding(vertical = 4.dp, horizontal = 2.dp)
                 ) {

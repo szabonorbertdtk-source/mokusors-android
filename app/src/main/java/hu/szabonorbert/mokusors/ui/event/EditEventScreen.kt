@@ -46,6 +46,7 @@ fun EditEventScreen(
     // Pre-fill from event
     var eventType by remember { mutableStateOf(event.eventType) }
     var title by remember { mutableStateOf(event.title) }
+    var organizer by remember { mutableStateOf(event.organizer.ifBlank { "Debreceni Tankerületi Központ" }) }
     var location by remember { mutableStateOf(event.location) }
     var allDay by remember { mutableStateOf(event.allDay) }
     var startDate by remember { mutableStateOf(event.date) }
@@ -88,6 +89,7 @@ fun EditEventScreen(
                                 date = startDate,
                                 note = note,
                                 location = location,
+                                organizer = organizer,
                                 hasTodoList = hasTodoList,
                                 activities = activities,
                                 eventType = eventType,
@@ -159,6 +161,14 @@ fun EditEventScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 isError = title.isBlank()
+            )
+
+            OutlinedTextField(
+                value = organizer,
+                onValueChange = { organizer = it },
+                label = { Text("Szervező") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
             )
 
             OutlinedTextField(

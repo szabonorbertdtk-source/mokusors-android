@@ -25,6 +25,23 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
+
+// Legacy name→email mapping for tasks created before reminderTargetEmail was introduced
+private val taskOwnerEmailMap: Map<String, String> = mapOf(
+    "Buti Attila" to "attila.buti@kk.gov.hu",
+    "Dr. Asztalos Zsuzsa" to "zsuzsa.asztalos@kk.gov.hu",
+    "Dr. Csehi Roland" to "roland.csehi@kk.gov.hu",
+    "Dr. Vántus Andrásné" to "andrasne.vantus@kk.gov.hu",
+    "Fábián Márton" to "",
+    "Ivánka-Tóth Ivett" to "",
+    "Joó Imre Ákos" to "",
+    "Leiterné dr. Tóth Katalin" to "katalin.toth.leiterne@kk.gov.hu",
+    "Máté Gábor" to "gabor.mate@kk.gov.hu",
+    "Riskó Orsolya" to "orsolya.risko@kk.gov.hu",
+    "Szabó Norbert" to "norbert.szabo@kk.gov.hu",
+    "Zoványi Erika" to "erika.zovanyi@kk.gov.hu"
+)
 
 data class TaskItem(
     val id: String,
@@ -54,7 +71,6 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     val status = d["status"] as? String ?: "progress"
                     if (status == "irrelevant") return@mapNotNull null
 
-                    // Resolve deadline date: prefer deadlineAt Timestamp, then year/month/day parts
                     val deadlineDate: Date = when (val da = d["deadlineAt"]) {
                         is Timestamp -> da.toDate()
                         else -> {
@@ -103,7 +119,6 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             .update("status", "irrelevant")
     }
 
-    // Split by status
     val pending = tasks.filter { it.status != "done" }
     val done = tasks.filter { it.status == "done" }
     val now = Date()
@@ -134,13 +149,17 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
         ) {
             if (pending.isNotEmpty()) {
                 item {
-                    Text("Folyamatban", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    Text("Folyamatban (${pending.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 4.dp))
                 }
                 items(pending) { task ->
-                    val isOverdue = task.deadlineDate.before(now)
-                    val color = if (isOverdue) Color(0xFFFF3B30) else Color(0xFFFF9500)
+                    val daysLeft = TimeUnit.MILLISECONDS.toDays(task.deadlineDate.time - now.time)
+                    val color = when {
+                        task.deadlineDate.before(now) -> Color(0xFFFF3B30)  // overdue – red
+                        daysLeft <= 3 -> Color(0xFFFF9500)                  // near – orange
+                        else -> Color(0xFFFFCC00)                           // normal – yellow
+                    }
                     TaskCard(
                         task = task, color = color, dateFmt = dateFmt,
                         isAdmin = isAdmin, userEmail = userEmail,
@@ -151,7 +170,7 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             }
             if (done.isNotEmpty()) {
                 item {
-                    Text("Kész", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    Text("Kész (${done.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                 }
@@ -180,9 +199,17 @@ private fun TaskCard(
     val isDone = task.status == "done"
     val isSuperAdmin = userEmail.contains("laszlo.turk", ignoreCase = true) ||
         userEmail.contains("tunde.ilona.makkai", ignoreCase = true)
-    val isOwner = isSuperAdmin ||
-        task.owner.equals(userEmail, ignoreCase = true) ||
-        task.reminderTargetEmail.equals(userEmail, ignoreCase = true)
+
+    // Ownership: superadmin always, or email matches reminderTargetEmail, or legacy owner name map
+    val isOwner = isSuperAdmin || run {
+        val me = userEmail.lowercase()
+        if (task.reminderTargetEmail.isNotBlank()) {
+            task.reminderTargetEmail.lowercase() == me
+        } else {
+            val mappedEmail = taskOwnerEmailMap[task.owner]?.lowercase() ?: ""
+            mappedEmail.isNotEmpty() && mappedEmail == me
+        }
+    }
 
     Box(
         modifier = Modifier

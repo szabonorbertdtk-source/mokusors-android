@@ -25,6 +25,7 @@ data class CalendarEvent(
     val allDay: Boolean = false,
     val note: String = "",
     val location: String = "",
+    val organizer: String = "",
     val eventType: EventType = EventType.NONE,
     val visibleToUsers: Boolean = false,
     val hasTodoList: Boolean = false,

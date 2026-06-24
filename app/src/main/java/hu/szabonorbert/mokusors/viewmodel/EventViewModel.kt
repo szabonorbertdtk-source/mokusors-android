@@ -7,6 +7,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import hu.szabonorbert.mokusors.model.CalendarEvent
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.repository.EventRepository
+import hu.szabonorbert.mokusors.util.HungarianCalendar
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.Calendar
@@ -109,13 +110,12 @@ class EventViewModel : ViewModel() {
     }
 
     fun eventsForDay(date: Date): List<CalendarEvent> {
-        val cal = Calendar.getInstance().apply { time = date }
-        val isWeekend = cal.get(Calendar.DAY_OF_WEEK).let { it == Calendar.SATURDAY || it == Calendar.SUNDAY }
+        val isNonWorking = HungarianCalendar.isNonWorkingDay(date)
         val dayStart = startOfDay(date)
         val dayEnd = endOfDay(date)
         return _events.value
             .filter { event ->
-                if (event.isVacation && isWeekend) return@filter false
+                if (event.isVacation && isNonWorking) return@filter false
                 event.date <= dayEnd && event.endDate >= dayStart
             }
             .sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
@@ -136,6 +136,7 @@ class EventViewModel : ViewModel() {
         endDate: Date?,
         note: String,
         location: String,
+        organizer: String = "",
         hasTodoList: Boolean,
         activities: List<String>,
         eventType: EventType,
@@ -145,7 +146,7 @@ class EventViewModel : ViewModel() {
         onError: (String) -> Unit
     ) {
         repository.addEvent(
-            title, date, endDate, note, location, hasTodoList, activities,
+            title, date, endDate, note, location, organizer, hasTodoList, activities,
             eventType, visibleToUsers, allDay, onSuccess, onError
         )
     }
@@ -166,6 +167,7 @@ class EventViewModel : ViewModel() {
         date: Date,
         note: String,
         location: String,
+        organizer: String = "",
         hasTodoList: Boolean,
         activities: List<String>,
         eventType: EventType,
@@ -175,7 +177,7 @@ class EventViewModel : ViewModel() {
         onError: (String) -> Unit
     ) {
         repository.updateEvent(
-            firestoreID, title, date, note, location, hasTodoList, activities,
+            firestoreID, title, date, note, location, organizer, hasTodoList, activities,
             eventType, visibleToUsers, allDay, onSuccess, onError
         )
     }

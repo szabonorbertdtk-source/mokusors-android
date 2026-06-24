@@ -7,17 +7,25 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -28,6 +36,9 @@ import com.google.firebase.firestore.ListenerRegistration
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
+
+private val deadlineDisplayFmt = SimpleDateFormat("yyyy. MMM. d.", Locale("hu"))
+private val deadlineParseFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
 data class DataSheetField(
     val id: String,
@@ -44,7 +55,24 @@ data class DataSheet(
     val deadline: String,
     val status: String,
     val fields: List<DataSheetField>,
-    val multiRow: Boolean
+    val multiRow: Boolean,
+    val createdBy: String = ""
+) {
+    val deadlineFormatted: String get() {
+        if (deadline.isBlank()) return ""
+        return try {
+            val d = deadlineParseFmt.parse(deadline) ?: return deadline
+            deadlineDisplayFmt.format(d)
+        } catch (_: Exception) { deadline }
+    }
+}
+
+data class DataSheetRow(
+    val id: String,
+    val userId: String,
+    val userName: String,
+    val values: Map<String, String>,
+    val updatedAt: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,6 +93,11 @@ fun DataSheetsScreen(onBack: () -> Unit) {
     var isSaving by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf("") }
+
+    // multiRow state
+    var multiRowRows by remember { mutableStateOf<List<DataSheetRow>>(emptyList()) }
+    var editingMultiRowId by remember { mutableStateOf<String?>(null) } // null=list, ""=new, docId=edit
+    var editingValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     val selectedSheet = sheets.firstOrNull { it.id == selectedSheetId } ?: sheets.firstOrNull()
 
@@ -93,7 +126,8 @@ fun DataSheetsScreen(onBack: () -> Unit) {
                         deadline = d["deadline"] as? String ?: "",
                         status = (d["status"] as? String)?.lowercase() ?: "open",
                         fields = fields,
-                        multiRow = d["multiRow"] as? Boolean ?: false
+                        multiRow = d["multiRow"] as? Boolean ?: false,
+                        createdBy = d["createdBy"] as? String ?: d["creatorName"] as? String ?: ""
                     )
                 }.sortedWith(compareBy({ it.status != "open" }, { it.deadline.ifEmpty { "9999" } }))
                 if (selectedSheetId == null && sheets.isNotEmpty()) {
@@ -104,25 +138,49 @@ fun DataSheetsScreen(onBack: () -> Unit) {
         onDispose { reg.remove() }
     }
 
-    // Load own row for selected sheet
+    // Load rows for selected sheet
+    val isMultiRow = selectedSheet?.multiRow == true
     var rowListener by remember { mutableStateOf<ListenerRegistration?>(null) }
-    LaunchedEffect(selectedSheetId, uid) {
+    LaunchedEffect(selectedSheetId, uid, isMultiRow) {
         rowListener?.remove()
         rowListener = null
         ownValues = emptyMap()
         ownRowLoaded = false
+        multiRowRows = emptyList()
+        editingMultiRowId = null
+        editingValues = emptyMap()
         savedMessage = ""
         errorMsg = ""
         val sheetId = selectedSheetId ?: return@LaunchedEffect
         if (uid.isBlank()) return@LaunchedEffect
-        rowListener = db.collection("dataSheets").document(sheetId)
-            .collection("rows").document(uid)
-            .addSnapshotListener { snap, _ ->
-                @Suppress("UNCHECKED_CAST")
-                val vals = snap?.data?.get("values") as? Map<String, String> ?: emptyMap()
-                ownValues = vals
-                ownRowLoaded = true
-            }
+        if (isMultiRow) {
+            rowListener = db.collection("dataSheets").document(sheetId)
+                .collection("rows")
+                .whereEqualTo("userId", uid)
+                .addSnapshotListener { snap, _ ->
+                    @Suppress("UNCHECKED_CAST")
+                    multiRowRows = snap?.documents?.mapNotNull { doc ->
+                        val d = doc.data ?: return@mapNotNull null
+                        DataSheetRow(
+                            id = doc.id,
+                            userId = d["userId"] as? String ?: uid,
+                            userName = d["userName"] as? String ?: userName,
+                            values = (d["values"] as? Map<String, String>) ?: emptyMap(),
+                            updatedAt = d["updatedAt"] as? String ?: ""
+                        )
+                    } ?: emptyList()
+                    ownRowLoaded = true
+                }
+        } else {
+            rowListener = db.collection("dataSheets").document(sheetId)
+                .collection("rows").document(uid)
+                .addSnapshotListener { snap, _ ->
+                    @Suppress("UNCHECKED_CAST")
+                    val vals = snap?.data?.get("values") as? Map<String, String> ?: emptyMap()
+                    ownValues = vals
+                    ownRowLoaded = true
+                }
+        }
     }
     DisposableEffect(Unit) { onDispose { rowListener?.remove() } }
 
@@ -147,6 +205,40 @@ fun DataSheetsScreen(onBack: () -> Unit) {
             .set(data)
             .addOnSuccessListener { isSaving = false; savedMessage = "Sikeresen mentve." }
             .addOnFailureListener { e -> isSaving = false; errorMsg = e.message ?: "Mentési hiba." }
+    }
+
+    fun saveMultiRow() {
+        val sheetId = selectedSheetId ?: return
+        val editId = editingMultiRowId ?: return
+        isSaving = true
+        savedMessage = ""
+        errorMsg = ""
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
+        val data = mapOf(
+            "userId" to uid,
+            "userEmail" to userEmail,
+            "userName" to userName,
+            "institutionName" to userName,
+            "values" to editingValues,
+            "updatedAt" to now
+        )
+        val rowsRef = db.collection("dataSheets").document(sheetId).collection("rows")
+        val task = if (editId.isEmpty()) rowsRef.add(data) else rowsRef.document(editId).set(data)
+        task
+            .addOnSuccessListener {
+                isSaving = false
+                savedMessage = "Sikeresen mentve."
+                editingMultiRowId = null
+                editingValues = emptyMap()
+            }
+            .addOnFailureListener { e -> isSaving = false; errorMsg = e.message ?: "Mentési hiba." }
+    }
+
+    fun deleteMultiRow(rowId: String) {
+        val sheetId = selectedSheetId ?: return
+        db.collection("dataSheets").document(sheetId).collection("rows").document(rowId).delete()
     }
 
     Scaffold(
@@ -235,8 +327,12 @@ fun DataSheetsScreen(onBack: () -> Unit) {
                                         modifier = Modifier.size(14.dp))
                                 }
                             }
-                            if (sheet.deadline.isNotBlank()) {
-                                Text("Határidő: ${sheet.deadline}", fontSize = 13.sp,
+                            if (sheet.deadlineFormatted.isNotBlank()) {
+                                Text("Határidő: ${sheet.deadlineFormatted}", fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (sheet.createdBy.isNotBlank()) {
+                                Text(sheet.createdBy, fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -257,21 +353,61 @@ fun DataSheetsScreen(onBack: () -> Unit) {
 
             // Sheet form for selected sheet
             selectedSheet?.let { sheet ->
-                item {
-                    SheetFormCard(
-                        sheet = sheet,
-                        ownValues = ownValues,
-                        ownRowLoaded = ownRowLoaded,
-                        isSaving = isSaving,
-                        savedMessage = savedMessage,
-                        errorMsg = errorMsg,
-                        blue = blue,
-                        onValueChange = { id, v ->
-                            ownValues = ownValues.toMutableMap().also { it[id] = v }
-                            savedMessage = ""
-                        },
-                        onSave = { saveRow() }
-                    )
+                if (sheet.multiRow) {
+                    item {
+                        MultiRowSheetCard(
+                            sheet = sheet,
+                            rows = multiRowRows,
+                            editingId = editingMultiRowId,
+                            editingValues = editingValues,
+                            ownRowLoaded = ownRowLoaded,
+                            isSaving = isSaving,
+                            savedMessage = savedMessage,
+                            errorMsg = errorMsg,
+                            blue = blue,
+                            onStartNew = {
+                                editingMultiRowId = ""
+                                editingValues = emptyMap()
+                                savedMessage = ""
+                                errorMsg = ""
+                            },
+                            onStartEdit = { row ->
+                                editingMultiRowId = row.id
+                                editingValues = row.values
+                                savedMessage = ""
+                                errorMsg = ""
+                            },
+                            onDelete = { row -> deleteMultiRow(row.id) },
+                            onCancelEdit = {
+                                editingMultiRowId = null
+                                editingValues = emptyMap()
+                                savedMessage = ""
+                                errorMsg = ""
+                            },
+                            onValueChange = { id, v ->
+                                editingValues = editingValues.toMutableMap().also { it[id] = v }
+                                savedMessage = ""
+                            },
+                            onSave = { saveMultiRow() }
+                        )
+                    }
+                } else {
+                    item {
+                        SheetFormCard(
+                            sheet = sheet,
+                            ownValues = ownValues,
+                            ownRowLoaded = ownRowLoaded,
+                            isSaving = isSaving,
+                            savedMessage = savedMessage,
+                            errorMsg = errorMsg,
+                            blue = blue,
+                            onValueChange = { id, v ->
+                                ownValues = ownValues.toMutableMap().also { it[id] = v }
+                                savedMessage = ""
+                            },
+                            onSave = { saveRow() }
+                        )
+                    }
                 }
             }
         }
@@ -343,12 +479,13 @@ private fun SheetFormCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (sheet.deadline.isNotBlank()) {
+                        val formatted = sheet.deadlineFormatted
                         val deadlineText = when {
-                            deadlineDaysLeft == null -> "Határidő: ${sheet.deadline}"
-                            deadlineDaysLeft < 0 -> "Határidő lejárt"
-                            deadlineDaysLeft == 0L -> "Ma a határidő"
-                            deadlineDaysLeft == 1L -> "Holnap a határidő"
-                            else -> "Határidő: ${sheet.deadline} (${deadlineDaysLeft} nap)"
+                            deadlineDaysLeft == null -> "Határidő: $formatted"
+                            deadlineDaysLeft < 0 -> "Határidő lejárt ($formatted)"
+                            deadlineDaysLeft == 0L -> "Ma a határidő ($formatted)"
+                            deadlineDaysLeft == 1L -> "Holnap a határidő ($formatted)"
+                            else -> "Határidő: $formatted (${deadlineDaysLeft} nap)"
                         }
                         val deadlineColor = when {
                             deadlineDaysLeft == null || !isOpen -> accentColor
@@ -487,27 +624,80 @@ private fun FieldInput(
                 )
             }
             "date" -> {
+                val context = LocalContext.current
+                val displayText = if (value.isBlank()) "Válassz dátumot…" else {
+                    try {
+                        val d = deadlineParseFmt.parse(value)
+                        if (d != null) deadlineDisplayFmt.format(d) else value
+                    } catch (_: Exception) { value }
+                }
                 OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = enabled,
+                    value = displayText,
+                    onValueChange = {},
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = enabled) {
+                            val cal = java.util.Calendar.getInstance()
+                            if (value.isNotBlank()) {
+                                try {
+                                    cal.time = deadlineParseFmt.parse(value) ?: cal.time
+                                } catch (_: Exception) {}
+                            }
+                            DatePickerDialog(
+                                context,
+                                { _, y, m, d ->
+                                    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                                    val picked = java.util.Calendar.getInstance()
+                                        .apply { set(y, m, d) }.time
+                                    onValueChange(fmt.format(picked))
+                                },
+                                cal.get(java.util.Calendar.YEAR),
+                                cal.get(java.util.Calendar.MONTH),
+                                cal.get(java.util.Calendar.DAY_OF_MONTH)
+                            ).show()
+                        },
+                    enabled = false,
+                    readOnly = true,
                     singleLine = true,
-                    placeholder = { Text("éééé-hh-nn", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     shape = RoundedCornerShape(10.dp),
-                    colors = outlinedFieldColors(accentColor)
+                    colors = outlinedFieldColors(accentColor),
+                    trailingIcon = {
+                        Icon(Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            tint = if (enabled) accentColor else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 )
             }
             "time" -> {
+                val context = LocalContext.current
+                val displayText = if (value.isBlank()) "Válassz időpontot…" else value
                 OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = enabled,
+                    value = displayText,
+                    onValueChange = {},
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = enabled) {
+                            val parts = value.split(":")
+                            val h = parts.getOrNull(0)?.toIntOrNull() ?: 8
+                            val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                            TimePickerDialog(
+                                context,
+                                { _, hour, minute ->
+                                    onValueChange("%02d:%02d".format(hour, minute))
+                                },
+                                h, m, true
+                            ).show()
+                        },
+                    enabled = false,
+                    readOnly = true,
                     singleLine = true,
-                    placeholder = { Text("óó:pp", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     shape = RoundedCornerShape(10.dp),
-                    colors = outlinedFieldColors(accentColor)
+                    colors = outlinedFieldColors(accentColor),
+                    trailingIcon = {
+                        Icon(Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = if (enabled) accentColor else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 )
             }
             else -> { // "text", "datetime", default
@@ -520,6 +710,214 @@ private fun FieldInput(
                     shape = RoundedCornerShape(10.dp),
                     colors = outlinedFieldColors(accentColor)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MultiRowSheetCard(
+    sheet: DataSheet,
+    rows: List<DataSheetRow>,
+    editingId: String?,
+    editingValues: Map<String, String>,
+    ownRowLoaded: Boolean,
+    isSaving: Boolean,
+    savedMessage: String,
+    errorMsg: String,
+    blue: Color,
+    onStartNew: () -> Unit,
+    onStartEdit: (DataSheetRow) -> Unit,
+    onDelete: (DataSheetRow) -> Unit,
+    onCancelEdit: () -> Unit,
+    onValueChange: (String, String) -> Unit,
+    onSave: () -> Unit
+) {
+    val isOpen = sheet.status == "open"
+    val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
+    val deadlineDaysLeft = remember(sheet.deadline) {
+        if (sheet.deadline.isBlank()) null
+        else try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val deadline = fmt.parse(sheet.deadline) ?: return@remember null
+            TimeUnit.MILLISECONDS.toDays(deadline.time - System.currentTimeMillis())
+        } catch (_: Exception) { null }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Header
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                            modifier = Modifier.weight(1f, fill = false))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(accentColor.copy(alpha = 0.12f))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(if (isOpen) "Nyitott" else "Lezárt",
+                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor)
+                        }
+                    }
+                    if (sheet.description.isNotBlank()) {
+                        Text(sheet.description, fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (sheet.deadline.isNotBlank()) {
+                        val formatted = sheet.deadlineFormatted
+                        val deadlineText = when {
+                            deadlineDaysLeft == null -> "Határidő: $formatted"
+                            deadlineDaysLeft < 0 -> "Határidő lejárt ($formatted)"
+                            deadlineDaysLeft == 0L -> "Ma a határidő ($formatted)"
+                            deadlineDaysLeft == 1L -> "Holnap a határidő ($formatted)"
+                            else -> "Határidő: $formatted (${deadlineDaysLeft} nap)"
+                        }
+                        val deadlineColor = when {
+                            deadlineDaysLeft == null || !isOpen -> accentColor
+                            deadlineDaysLeft <= 3 -> Color(0xFFFF3B30)
+                            deadlineDaysLeft <= 7 -> Color(0xFFFF9500)
+                            else -> accentColor
+                        }
+                        Text(deadlineText, fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium, color = deadlineColor)
+                    }
+                }
+                if (isOpen && editingId == null) {
+                    IconButton(onClick = onStartNew) {
+                        Icon(Icons.Default.Add, contentDescription = "Új sor", tint = accentColor)
+                    }
+                }
+            }
+
+            if (!isOpen) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF8E8E93).copy(alpha = 0.10f))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Lock, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(15.dp))
+                    Text("Ez az adatszolgáltatás lezárva.", fontSize = 13.sp,
+                        color = Color(0xFF8E8E93), fontWeight = FontWeight.Medium)
+                }
+            }
+
+            if (!ownRowLoaded) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+
+            // Editing form (new or existing row)
+            if (editingId != null) {
+                HorizontalDivider()
+                Text(
+                    if (editingId.isEmpty()) "Új sor" else "Sor szerkesztése",
+                    fontWeight = FontWeight.SemiBold, fontSize = 15.sp
+                )
+                if (sheet.fields.isEmpty()) {
+                    Text("Ennek az adatszolgáltatásnak nincsenek mezői.",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    sheet.fields.forEach { field ->
+                        FieldInput(
+                            field = field,
+                            value = editingValues[field.id] ?: "",
+                            enabled = true,
+                            accentColor = accentColor,
+                            onValueChange = { onValueChange(field.id, it) }
+                        )
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onCancelEdit,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Mégse") }
+                    Button(
+                        onClick = onSave,
+                        enabled = !isSaving,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = accentColor)
+                    ) { Text(if (isSaving) "Mentés..." else "Mentés", fontWeight = FontWeight.Bold) }
+                }
+                if (savedMessage.isNotBlank()) {
+                    Text(savedMessage, fontSize = 14.sp, color = Color(0xFF34C759),
+                        fontWeight = FontWeight.SemiBold)
+                }
+                if (errorMsg.isNotBlank()) {
+                    Text(errorMsg, fontSize = 13.sp, color = Color(0xFFFF3B30))
+                }
+            } else {
+                // Row list
+                if (ownRowLoaded && rows.isEmpty()) {
+                    Text("Még nincs beküldött sor.", fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                rows.forEachIndexed { index, row ->
+                    HorizontalDivider()
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("${index + 1}. sor", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            val firstValue = sheet.fields.firstOrNull()
+                                ?.let { row.values[it.id] }?.takeIf { it.isNotBlank() }
+                            if (firstValue != null) {
+                                Text(firstValue, fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                        }
+                        if (isOpen) {
+                            Row {
+                                IconButton(onClick = { onStartEdit(row) }) {
+                                    Icon(Icons.Default.Edit, null, tint = accentColor,
+                                        modifier = Modifier.size(20.dp))
+                                }
+                                IconButton(onClick = { onDelete(row) }) {
+                                    Icon(Icons.Default.Delete, null, tint = Color(0xFFFF3B30),
+                                        modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                if (isOpen && ownRowLoaded) {
+                    Button(
+                        onClick = onStartNew,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = accentColor)
+                    ) {
+                        Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Új sor hozzáadása", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }

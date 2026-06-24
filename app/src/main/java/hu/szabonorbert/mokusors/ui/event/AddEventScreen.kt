@@ -16,8 +16,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.viewmodel.EventViewModel
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -108,12 +111,16 @@ fun AddEventScreen(
                                     endDate = if (allDay) null else endDate,
                                     note = note,
                                     location = location,
+                                    organizer = organizer,
                                     hasTodoList = hasTodoList,
                                     activities = activities,
                                     eventType = eventType,
                                     visibleToUsers = visibleToUsers,
                                     allDay = allDay,
-                                    onSuccess = { onBack() },
+                                    onSuccess = {
+                                        sendAdminEventNotification(title, startDate)
+                                        onBack()
+                                    },
                                     onError = { msg -> isSaving = false; errorMsg = msg }
                                 )
                             }
@@ -421,5 +428,26 @@ private fun TimePickerField(
             modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text("$label: ${timeDisplayFmt.format(date)}")
+    }
+}
+
+private fun sendAdminEventNotification(title: String, date: Date) {
+    val eventDateStr = SimpleDateFormat("yyyy. MM. dd.", Locale("hu")).format(date)
+    FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.addOnSuccessListener { result ->
+        val token = result.token ?: return@addOnSuccessListener
+        Thread {
+            try {
+                val conn = URL("https://mokusors-admin.vercel.app/api/admin/notifications/admin-event")
+                    .openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.doOutput = true
+                val body = """{"eventTitle":${org.json.JSONObject.quote(title)},"eventDate":${org.json.JSONObject.quote(eventDateStr)}}"""
+                conn.outputStream.write(body.toByteArray())
+                conn.responseCode
+                conn.disconnect()
+            } catch (_: Exception) {}
+        }.start()
     }
 }

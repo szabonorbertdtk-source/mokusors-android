@@ -122,19 +122,17 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
         }
     }
 
-    fun register(event: RegEvent, slotId: String, seats: Int, contactName: String, contactInfo: String) {
-        val slot = event.slots.firstOrNull { it.id == slotId } ?: return
+    fun registerMultiple(
+        event: RegEvent, slotIds: List<String>, seats: Int,
+        contactName: String, contactInfo: String
+    ) {
+        if (slotIds.isEmpty()) return
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
             .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
-        val docId = "${uid}_${slotId}"
-        val entry = mapOf(
-            "id" to docId, "eventId" to event.id, "slotId" to slotId,
-            "userId" to uid, "userEmail" to userEmail, "userName" to userName,
-            "contactName" to contactName, "contactInfo" to contactInfo,
-            "reservedSeats" to seats, "createdAt" to now
-        )
         val eventRef = db.collection("registrationEvents").document(event.id)
-        val regRef = eventRef.collection("registrations").document(docId)
+        val existingSlotIds = event.registrations.filter { it.userId == uid }.map { it.slotId }.toSet()
+        val toRemove = existingSlotIds - slotIds.toSet()
+        val toAdd = slotIds.toSet() - existingSlotIds
 
         db.runTransaction { tx ->
             val snap = tx.get(eventRef)
@@ -142,10 +140,30 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                 ?.mapKeys { it.key.toString() }
                 ?.mapValues { (it.value as? Long)?.toInt() ?: 0 }
                 ?.toMutableMap() ?: mutableMapOf()
-            val used = slotUsage[slotId] ?: 0
-            if (used + seats > slot.capacity) throw Exception("Nincs elég szabad férőhely.")
-            slotUsage[slotId] = used + seats
-            tx.set(regRef, entry)
+
+            // Release slots being removed
+            toRemove.forEach { slotId ->
+                val oldReg = event.registrations.firstOrNull { it.userId == uid && it.slotId == slotId }
+                val used = slotUsage[slotId] ?: 0
+                slotUsage[slotId] = maxOf(0, used - (oldReg?.reservedSeats ?: 1))
+                tx.delete(eventRef.collection("registrations").document("${uid}_$slotId"))
+            }
+
+            // Add new slots
+            toAdd.forEach { slotId ->
+                val slot = event.slots.firstOrNull { it.id == slotId } ?: return@forEach
+                val used = slotUsage[slotId] ?: 0
+                if (used + seats > slot.capacity) throw Exception("Nincs elég szabad férőhely.")
+                slotUsage[slotId] = used + seats
+                val docId = "${uid}_$slotId"
+                tx.set(eventRef.collection("registrations").document(docId), mapOf(
+                    "id" to docId, "eventId" to event.id, "slotId" to slotId,
+                    "userId" to uid, "userEmail" to userEmail, "userName" to userName,
+                    "contactName" to contactName, "contactInfo" to contactInfo,
+                    "reservedSeats" to seats, "createdAt" to now
+                ))
+            }
+
             tx.update(eventRef, mapOf("slotUsage" to slotUsage,
                 "updatedAt" to now, "updatedAtServer" to FieldValue.serverTimestamp()))
         }
@@ -250,7 +268,7 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 
                         // Slots
                         if (event.slots.isNotEmpty()) {
-                            SlotsList(event, uid, green, blue)
+                            SlotsList(event, uid, green, blue, isAdmin)
                         }
 
                         // Stats
@@ -291,8 +309,8 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             event = event,
             existingRegs = event.registrations.filter { it.userId == uid },
             onDismiss = { showFormFor = null },
-            onSubmit = { slotId, seats, contactName, contactInfo ->
-                register(event, slotId, seats, contactName, contactInfo)
+            onSubmit = { slotIds, seats, contactName, contactInfo ->
+                registerMultiple(event, slotIds, seats, contactName, contactInfo)
                 showFormFor = null
             }
         )
@@ -300,10 +318,11 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SlotsList(event: RegEvent, uid: String, green: Color, blue: Color) {
+private fun SlotsList(event: RegEvent, uid: String, green: Color, blue: Color, isAdmin: Boolean = false) {
     val slotFmt = remember { SimpleDateFormat("MMM d., HH:mm", Locale("hu")) }
     val ownSlotIds = event.registrations.filter { it.userId == uid }.map { it.slotId }.toSet()
     val slotUsage = event.registrations.groupBy { it.slotId }.mapValues { e -> e.value.sumOf { it.reservedSeats } }
+    val regsBySlot = if (isAdmin) event.registrations.groupBy { it.slotId } else emptyMap()
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Időpontok:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
@@ -312,7 +331,9 @@ private fun SlotsList(event: RegEvent, uid: String, green: Color, blue: Color) {
             val used = slotUsage[slot.id] ?: 0
             val free = slot.capacity - used
             val isOwn = slot.id in ownSlotIds
-            Row(
+            val slotRegs = regsBySlot[slot.id] ?: emptyList()
+
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
@@ -321,18 +342,32 @@ private fun SlotsList(event: RegEvent, uid: String, green: Color, blue: Color) {
                         else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     )
                     .padding(horizontal = 10.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (isOwn) Icon(Icons.Default.CheckCircle, null, tint = green, modifier = Modifier.size(14.dp))
-                    Text(slotFmt.format(slot.startsAt), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (isOwn) Icon(Icons.Default.CheckCircle, null, tint = green, modifier = Modifier.size(14.dp))
+                        Text(slotFmt.format(slot.startsAt), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                    Text(
+                        text = if (free <= 0) "Telt" else "$free szabad / ${slot.capacity}",
+                        fontSize = 12.sp,
+                        color = if (free <= 0) Color(0xFFFF3B30) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                Text(
-                    text = if (free <= 0) "Telt" else "$free szabad / ${slot.capacity}",
-                    fontSize = 12.sp,
-                    color = if (free <= 0) Color(0xFFFF3B30) else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (isAdmin && slotRegs.isNotEmpty()) {
+                    slotRegs.forEach { reg ->
+                        Text(
+                            "· ${reg.userName.ifBlank { reg.contactName }} (${reg.reservedSeats} fő)",
+                            fontSize = 11.sp,
+                            color = blue
+                        )
+                    }
+                }
             }
         }
     }
@@ -344,10 +379,16 @@ private fun RegistrationFormDialog(
     event: RegEvent,
     existingRegs: List<RegEntry>,
     onDismiss: () -> Unit,
-    onSubmit: (slotId: String, seats: Int, contactName: String, contactInfo: String) -> Unit
+    onSubmit: (slotIds: List<String>, seats: Int, contactName: String, contactInfo: String) -> Unit
 ) {
     val slotFmt = remember { SimpleDateFormat("MMM d., EEEE HH:mm", Locale("hu")) }
-    var selectedSlotId by remember { mutableStateOf(existingRegs.firstOrNull()?.slotId ?: event.slots.firstOrNull()?.id ?: "") }
+    var selectedSlotIds by remember {
+        mutableStateOf(
+            existingRegs.map { it.slotId }.toSet().ifEmpty {
+                setOfNotNull(event.slots.firstOrNull()?.id)
+            }
+        )
+    }
     var seats by remember { mutableStateOf(existingRegs.firstOrNull()?.reservedSeats?.toString() ?: "1") }
     var contactName by remember { mutableStateOf(existingRegs.firstOrNull()?.contactName ?: "") }
     var contactInfo by remember { mutableStateOf(existingRegs.firstOrNull()?.contactInfo ?: "") }
@@ -364,10 +405,13 @@ private fun RegistrationFormDialog(
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(event.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
 
-                // Slot selection
-                Text("Időpont kiválasztása:", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                // Multi-slot selection
+                Text(
+                    if (event.slots.size > 1) "Időpont(ok) kiválasztása:" else "Időpont:",
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                )
                 event.slots.forEach { slot ->
-                    val isSelected = slot.id == selectedSlotId
+                    val isSelected = slot.id in selectedSlotIds
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -376,13 +420,22 @@ private fun RegistrationFormDialog(
                                 if (isSelected) Color(0xFF007AFF).copy(alpha = 0.12f)
                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                             )
-                            .clickable { selectedSlotId = slot.id }
+                            .clickable {
+                                selectedSlotIds = if (isSelected) selectedSlotIds - slot.id
+                                else selectedSlotIds + slot.id
+                            }
                             .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = isSelected, onClick = { selectedSlotId = slot.id })
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    selectedSlotIds = if (checked) selectedSlotIds + slot.id
+                                    else selectedSlotIds - slot.id
+                                }
+                            )
                             Text(slotFmt.format(slot.startsAt), fontSize = 14.sp)
                         }
                         Text("${slot.capacity} fő", fontSize = 12.sp,
@@ -428,10 +481,10 @@ private fun RegistrationFormDialog(
                     Button(
                         onClick = {
                             when {
-                                selectedSlotId.isBlank() -> errorMsg = "Válasszon időpontot."
+                                selectedSlotIds.isEmpty() -> errorMsg = "Válasszon legalább egy időpontot."
                                 contactName.isBlank() -> errorMsg = "Adja meg a kapcsolattartó nevét."
                                 contactInfo.isBlank() -> errorMsg = "Adja meg az elérhetőséget."
-                                else -> onSubmit(selectedSlotId, seats.toIntOrNull() ?: 1, contactName, contactInfo)
+                                else -> onSubmit(selectedSlotIds.toList(), seats.toIntOrNull() ?: 1, contactName, contactInfo)
                             }
                         },
                         modifier = Modifier.weight(1f),

@@ -33,6 +33,7 @@ import hu.szabonorbert.mokusors.model.CalendarEvent
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.ui.theme.AppColors
 import hu.szabonorbert.mokusors.ui.theme.LocalAppColors
+import hu.szabonorbert.mokusors.util.HungarianCalendar
 import hu.szabonorbert.mokusors.viewmodel.EventViewModel
 import hu.szabonorbert.mokusors.viewmodel.MenuSettings
 import java.text.SimpleDateFormat
@@ -41,11 +42,8 @@ import java.util.*
 private val monthTitleFmt = SimpleDateFormat("yyyy. MMMM", Locale("hu"))
 private val dayHeaderFmt = SimpleDateFormat("yyyy.MM.dd. EEEE", Locale("hu"))
 private val timeFmt = SimpleDateFormat("HH:mm", Locale("hu"))
-private val holidayFmt = SimpleDateFormat("MM-dd", Locale.US)
 
-private val hungarianHolidays = setOf(
-    "01-01","03-15","05-01","08-20","10-23","11-01","12-24","12-25","12-26"
-)
+// HungarianCalendar utility imported from util package
 private val weekHeaders = listOf("H","K","Sze","Cs","P","Szo","V")
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -496,20 +494,23 @@ private fun MonthGrid(
                     val cellDate = makeDate(year, month, dayNum, 0, 0, 0)
                     val cellEnd = makeDate(year, month, dayNum, 23, 59, 59)
                     val dow = Calendar.getInstance().apply { time = cellDate }.get(Calendar.DAY_OF_WEEK)
-                    val isWeekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
+                    val isTransferredWorkday = HungarianCalendar.isTransferredWorkday(cellDate)
+                    val isWeekend = (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) && !isTransferredWorkday
+                    val isHoliday = HungarianCalendar.isHoliday(cellDate)
+                    val isNonWorking = isWeekend || isHoliday
                     val dayEvents = events.filter { event ->
-                        if (event.isVacation && isWeekend) return@filter false
+                        if (event.isVacation && isNonWorking) return@filter false
                         event.date <= cellEnd && event.endDate >= cellDate
                     }.sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
                     val isSelected = cellDate == selectedDay
                     val isToday = cellDate == today
-                    val isHoliday = hungarianHolidays.contains(holidayFmt.format(cellDate))
                     val blue = appColors.statusBlue
 
                     Box(
                         modifier = Modifier.weight(1f).height(76.dp)
                             .background(when {
                                 isHoliday -> Color(0xFFFF3B30).copy(alpha = 0.06f)
+                                isTransferredWorkday -> Color(0xFF34C759).copy(alpha = 0.05f)
                                 isWeekend -> Color(0xFF5856D6).copy(alpha = 0.04f)
                                 else -> Color.Transparent
                             })
@@ -537,6 +538,7 @@ private fun MonthGrid(
                                         isToday -> Color.White
                                         isSelected -> blue
                                         isHoliday -> appColors.statusRed
+                                        isTransferredWorkday -> Color(0xFF34C759)
                                         isWeekend -> Color(0xFF5856D6)
                                         else -> MaterialTheme.colorScheme.onSurface
                                     }
@@ -648,6 +650,10 @@ fun EventRow(
                     Text(event.location, fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
+                if (event.note.isNotBlank() && !compact) {
+                    Text(event.note, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                }
                 if (isAdmin && !compact) {
                     if (event.hasTodoList) {
                         Text("${event.completedTaskCount}/${event.totalTaskCount} kész",
@@ -681,6 +687,18 @@ fun AppCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -
 
 // ── Widget: today's deadline tasks ────────────────────────────────────────────
 
+private val widgetOwnerEmailMap: Map<String, String> = mapOf(
+    "Buti Attila" to "attila.buti@kk.gov.hu",
+    "Dr. Asztalos Zsuzsa" to "zsuzsa.asztalos@kk.gov.hu",
+    "Dr. Csehi Roland" to "roland.csehi@kk.gov.hu",
+    "Dr. Vántus Andrásné" to "andrasne.vantus@kk.gov.hu",
+    "Leiterné dr. Tóth Katalin" to "katalin.toth.leiterne@kk.gov.hu",
+    "Máté Gábor" to "gabor.mate@kk.gov.hu",
+    "Riskó Orsolya" to "orsolya.risko@kk.gov.hu",
+    "Szabó Norbert" to "norbert.szabo@kk.gov.hu",
+    "Zoványi Erika" to "erika.zovanyi@kk.gov.hu"
+)
+
 private data class SimpleTask(val id: String, val title: String, val owner: String, val status: String)
 
 @Composable
@@ -696,27 +714,43 @@ private fun WidgetTodayTasksCard() {
         val month = today.get(Calendar.MONTH) + 1
         val year = today.get(Calendar.YEAR)
 
-        val reg: ListenerRegistration = FirebaseFirestore.getInstance()
-            .collection("deadlineTasks")
+        fun parseTask(doc: com.google.firebase.firestore.DocumentSnapshot): SimpleTask? {
+            val d = doc.data ?: return null
+            val status = d["status"] as? String ?: "progress"
+            if (status == "done" || status == "irrelevant") return null
+            val taskDay = (d["day"] as? Long)?.toInt() ?: return null
+            val taskMonth = (d["month"] as? Long)?.toInt() ?: return null
+            val taskYear = (d["year"] as? Long)?.toInt() ?: return null
+            if (taskDay != day || taskMonth != month || taskYear != year) return null
+            return SimpleTask(id = doc.id, title = d["title"] as? String ?: "",
+                owner = d["owner"] as? String ?: "", status = status)
+        }
+
+        val db = FirebaseFirestore.getInstance()
+        // Primary: by reminderTargetEmail
+        val r1 = db.collection("deadlineTasks")
             .whereEqualTo("reminderTargetEmail", userEmail)
             .addSnapshotListener { snap, _ ->
-                tasks = (snap?.documents ?: emptyList()).mapNotNull { doc ->
-                    val d = doc.data ?: return@mapNotNull null
-                    val status = d["status"] as? String ?: "progress"
-                    if (status == "done" || status == "irrelevant") return@mapNotNull null
-                    val taskDay = (d["day"] as? Long)?.toInt() ?: return@mapNotNull null
-                    val taskMonth = (d["month"] as? Long)?.toInt() ?: return@mapNotNull null
-                    val taskYear = (d["year"] as? Long)?.toInt() ?: return@mapNotNull null
-                    if (taskDay != day || taskMonth != month || taskYear != year) return@mapNotNull null
-                    SimpleTask(
-                        id = doc.id,
-                        title = d["title"] as? String ?: "",
-                        owner = d["owner"] as? String ?: "",
-                        status = status
-                    )
-                }
+                val primary = (snap?.documents ?: emptyList()).mapNotNull { parseTask(it) }
+                tasks = (tasks.filter { t -> primary.none { it.id == t.id } } + primary)
+                    .distinctBy { it.id }
             }
-        onDispose { reg.remove() }
+        // Legacy: by owner display name (for tasks created before reminderTargetEmail)
+        val ownerName = widgetOwnerEmailMap.entries.firstOrNull { it.value == userEmail }?.key
+        val r2 = if (ownerName != null) {
+            db.collection("deadlineTasks")
+                .whereEqualTo("owner", ownerName)
+                .addSnapshotListener { snap, _ ->
+                    val legacy = (snap?.documents ?: emptyList()).mapNotNull { doc ->
+                        val d = doc.data ?: return@mapNotNull null
+                        if ((d["reminderTargetEmail"] as? String).isNullOrBlank()) parseTask(doc)
+                        else null // already caught by primary listener
+                    }
+                    tasks = (tasks.filter { t -> legacy.none { it.id == t.id } } + legacy)
+                        .distinctBy { it.id }
+                }
+        } else null
+        onDispose { r1.remove(); r2?.remove() }
     }
 
     Box(

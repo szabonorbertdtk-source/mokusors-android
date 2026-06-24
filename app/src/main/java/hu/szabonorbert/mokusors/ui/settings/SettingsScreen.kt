@@ -247,7 +247,13 @@ fun SettingsScreen(
 
             // App info
             SettingsSection(title = "Alkalmazás") {
-                LabeledItem(label = "Verzió", value = "1.5")
+                val ctx = LocalContext.current
+                val versionName = remember {
+                    try {
+                        ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: ""
+                    } catch (_: Exception) { "" }
+                }
+                LabeledItem(label = "Verzió", value = versionName)
             }
 
             Spacer(Modifier.height(4.dp))

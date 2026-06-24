@@ -20,8 +20,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 data class AppDocumentFolder(
     val id: String,
@@ -38,12 +42,19 @@ data class AppDocument(
     val fileType: String,
     val uploadedBy: String,
     val uploadedAt: String,
-    val folderId: String?
+    val folderId: String?,
+    val adminVisibility: List<String> = emptyList()
 )
+
+private val uploadDateParseFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+    timeZone = TimeZone.getTimeZone("UTC")
+}
+private val uploadDateDisplayFmt = SimpleDateFormat("yyyy. MMM. d.", Locale("hu"))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DocumentsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
+    val currentUid = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
     var folders by remember { mutableStateOf<List<AppDocumentFolder>>(emptyList()) }
     var docs by remember { mutableStateOf<List<AppDocument>>(emptyList()) }
     var foldersLoaded by remember { mutableStateOf(false) }
@@ -63,8 +74,15 @@ fun DocumentsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     val visibility = d["visibility"] as? List<String> ?: emptyList()
                     @Suppress("UNCHECKED_CAST")
                     val adminVisibility = d["adminVisibility"] as? List<String> ?: emptyList()
-                    if (!isAdmin && visibility.isNotEmpty() && !visibility.contains("user")) {
-                        return@mapNotNull null
+                    if (isAdmin) {
+                        // Admin: only show if adminVisibility is empty (all admins) OR contains this UID
+                        if (adminVisibility.isNotEmpty() && !adminVisibility.contains(currentUid)) {
+                            return@mapNotNull null
+                        }
+                    } else {
+                        if (visibility.isNotEmpty() && !visibility.contains("user")) {
+                            return@mapNotNull null
+                        }
                     }
                     AppDocumentFolder(
                         id = doc.id,
@@ -84,8 +102,16 @@ fun DocumentsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     if (fileUrl.isBlank()) return@mapNotNull null
                     @Suppress("UNCHECKED_CAST")
                     val visibility = d["visibility"] as? List<String> ?: emptyList()
-                    if (!isAdmin && visibility.isNotEmpty() && !visibility.contains("user")) {
-                        return@mapNotNull null
+                    @Suppress("UNCHECKED_CAST")
+                    val docAdminVisibility = d["adminVisibility"] as? List<String> ?: emptyList()
+                    if (isAdmin) {
+                        if (docAdminVisibility.isNotEmpty() && !docAdminVisibility.contains(currentUid)) {
+                            return@mapNotNull null
+                        }
+                    } else {
+                        if (visibility.isNotEmpty() && !visibility.contains("user")) {
+                            return@mapNotNull null
+                        }
                     }
                     AppDocument(
                         id = doc.id,
@@ -95,7 +121,8 @@ fun DocumentsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         fileType = d["fileType"] as? String ?: "",
                         uploadedBy = d["uploadedBy"] as? String ?: "",
                         uploadedAt = d["uploadedAt"] as? String ?: "",
-                        folderId = d["folderId"] as? String
+                        folderId = d["folderId"] as? String,
+                        adminVisibility = docAdminVisibility
                     )
                 }.sortedByDescending { it.uploadedAt }
                 docsLoaded = true
@@ -234,8 +261,19 @@ private fun DocRow(
                     fontWeight = if (large) FontWeight.Bold else FontWeight.Medium,
                     fontSize = if (large) 16.sp else 14.sp
                 )
-                if (doc.uploadedBy.isNotBlank()) {
-                    Text(doc.uploadedBy, fontSize = if (large) 13.sp else 12.sp,
+                val metaParts = buildList {
+                    if (doc.uploadedBy.isNotBlank()) add(doc.uploadedBy)
+                    if (doc.uploadedAt.isNotBlank()) {
+                        val formatted = try {
+                            val d = uploadDateParseFmt.parse(doc.uploadedAt)
+                            if (d != null) uploadDateDisplayFmt.format(d) else null
+                        } catch (_: Exception) { null }
+                        if (formatted != null) add(formatted)
+                    }
+                }
+                if (metaParts.isNotEmpty()) {
+                    Text(metaParts.joinToString(" · "),
+                        fontSize = if (large) 13.sp else 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

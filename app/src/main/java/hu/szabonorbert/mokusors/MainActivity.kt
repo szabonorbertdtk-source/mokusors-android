@@ -176,7 +176,7 @@ fun MokusorsApp(
                     RegistrationsScreen(isAdmin = isAdmin) { navController.popBackStack() }
                 }
                 composable("datasheets") { DataSheetsScreen { navController.popBackStack() } }
-                composable("marketplace") { MarketplaceScreen { navController.popBackStack() } }
+                composable("marketplace") { MarketplaceScreen(isAdmin = isAdmin) { navController.popBackStack() } }
                 composable("resumes") {
                     ResumesScreen(isAdmin = isAdmin) { navController.popBackStack() }
                 }
