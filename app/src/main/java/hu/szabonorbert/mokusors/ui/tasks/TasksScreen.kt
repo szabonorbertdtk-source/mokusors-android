@@ -176,7 +176,10 @@ private fun TaskCard(
     onMarkIrrelevant: () -> Unit
 ) {
     val isDone = task.status == "done"
-    val isOwner = task.owner.equals(userEmail, ignoreCase = true) ||
+    val isSuperAdmin = userEmail.contains("laszlo.turk", ignoreCase = true) ||
+        userEmail.contains("tunde.ilona.makkai", ignoreCase = true)
+    val isOwner = isSuperAdmin ||
+        task.owner.equals(userEmail, ignoreCase = true) ||
         task.reminderTargetEmail.equals(userEmail, ignoreCase = true)
 
     Box(
