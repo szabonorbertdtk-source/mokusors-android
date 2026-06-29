@@ -1,5 +1,8 @@
 package hu.szabonorbert.mokusors.ui.event
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,12 +13,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.storage.FirebaseStorage
 import hu.szabonorbert.mokusors.model.CalendarEvent
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.viewmodel.EventViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.util.*
 
 private val editActivityKeys = listOf("dtk", "kk", "press", "ph", "catering", "gifts", "certificate")
@@ -36,6 +46,9 @@ fun EditEventScreen(
     eventViewModel: EventViewModel,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     val eventTypeOptions = listOf(
         EventType.NONE to "Nincs",
         EventType.GUEST to "Vendég",
@@ -43,7 +56,6 @@ fun EditEventScreen(
         EventType.VACATION to "Szabadság"
     )
 
-    // Pre-fill from event
     var eventType by remember { mutableStateOf(event.eventType) }
     var title by remember { mutableStateOf(event.title) }
     var organizer by remember { mutableStateOf(event.organizer.ifBlank { "Debreceni Tankerületi Központ" }) }
@@ -61,13 +73,33 @@ fun EditEventScreen(
     }
     var visibleToUsers by remember { mutableStateOf(event.visibleToUsers) }
 
+    // PDF state: keep existing URL unless user changes it
+    var existingPdfUrl by remember { mutableStateOf(event.pdfUrl) }
+    var pickedPdfUri by remember { mutableStateOf<Uri?>(null) }
+    var pickedPdfName by remember { mutableStateOf("") }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        pickedPdfUri = uri
+        if (uri != null) {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (it.moveToFirst() && nameIndex >= 0) pickedPdfName = it.getString(nameIndex)
+            }
+        }
+    }
+
     var isSaving by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     val canSave = when (eventType) {
-        EventType.VACATION -> true  // vacation edit: title already set from vacationPeople
+        EventType.VACATION -> true
         else -> title.isNotBlank()
     }
+
+    val activePdfUrl = if (pickedPdfUri != null) null else existingPdfUrl
 
     Scaffold(
         topBar = {
@@ -83,21 +115,34 @@ fun EditEventScreen(
                             isSaving = true
                             errorMsg = null
                             val activities = if (hasTodoList) selectedActivities.toList() else emptyList()
-                            eventViewModel.updateEvent(
-                                firestoreID = event.firestoreID,
-                                title = title,
-                                date = startDate,
-                                note = note,
-                                location = location,
-                                organizer = organizer,
-                                hasTodoList = hasTodoList,
-                                activities = activities,
-                                eventType = eventType,
-                                visibleToUsers = visibleToUsers,
-                                allDay = allDay,
-                                onSuccess = { onBack() },
-                                onError = { msg -> isSaving = false; errorMsg = msg }
-                            )
+                            scope.launch {
+                                val resolvedPdfUrl = when {
+                                    pickedPdfUri != null -> try {
+                                        val storageRef = FirebaseStorage.getInstance().reference
+                                            .child("events/${System.currentTimeMillis()}-${UUID.randomUUID()}.pdf")
+                                        val stream = context.contentResolver.openInputStream(pickedPdfUri!!)!!
+                                        withContext(Dispatchers.IO) { storageRef.putStream(stream).await(); stream.close() }
+                                        storageRef.downloadUrl.await().toString()
+                                    } catch (_: Exception) { existingPdfUrl }
+                                    else -> existingPdfUrl
+                                }
+                                eventViewModel.updateEvent(
+                                    firestoreID = event.firestoreID,
+                                    title = title,
+                                    date = startDate,
+                                    note = note,
+                                    location = location,
+                                    organizer = organizer,
+                                    hasTodoList = hasTodoList,
+                                    activities = activities,
+                                    eventType = eventType,
+                                    visibleToUsers = visibleToUsers,
+                                    allDay = allDay,
+                                    pdfUrl = resolvedPdfUrl,
+                                    onSuccess = { onBack() },
+                                    onError = { msg -> isSaving = false; errorMsg = msg }
+                                )
+                            }
                         },
                         enabled = canSave && !isSaving
                     ) {
@@ -136,7 +181,6 @@ fun EditEventScreen(
                 }
             }
 
-            // Event type picker
             Text("Esemény típusa", fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
@@ -153,7 +197,6 @@ fun EditEventScreen(
 
             HorizontalDivider()
 
-            // Event fields (same form regardless of eventType in edit mode)
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
@@ -294,6 +337,75 @@ fun EditEventScreen(
                 Switch(checked = visibleToUsers, onCheckedChange = { visibleToUsers = it })
             }
 
+            HorizontalDivider()
+
+            // PDF invite section
+            Text("PDF meghívó", fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            when {
+                pickedPdfUri != null -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, null,
+                                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            Text(pickedPdfName.ifBlank { "PDF csatolva" },
+                                fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { pickedPdfUri = null; pickedPdfName = "" }) {
+                            Icon(Icons.Default.Close, null)
+                        }
+                    }
+                }
+                existingPdfUrl.isNotBlank() -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, null,
+                                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            Text("PDF meghívó csatolva", fontSize = 14.sp)
+                        }
+                        IconButton(onClick = { existingPdfUrl = "" }) {
+                            Icon(Icons.Default.Close, null)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { pdfPicker.launch("application/pdf") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.AttachFile, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("PDF cseréje")
+                    }
+                }
+                else -> {
+                    OutlinedButton(
+                        onClick = { pdfPicker.launch("application/pdf") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.AttachFile, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("PDF meghívó csatolása")
+                    }
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -305,7 +417,7 @@ private fun TimePickerFieldEdit(
     date: java.util.Date,
     onTimeSelected: (hour: Int, minute: Int) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val timeDisplayFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale("hu")) }
     OutlinedButton(
         onClick = {

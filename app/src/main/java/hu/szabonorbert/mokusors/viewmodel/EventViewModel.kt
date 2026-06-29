@@ -37,6 +37,9 @@ class EventViewModel : ViewModel() {
     private val _isAdmin = MutableStateFlow(false)
     val isAdmin: StateFlow<Boolean> = _isAdmin
 
+    private val _adminResolved = MutableStateFlow(false)
+    val adminResolved: StateFlow<Boolean> = _adminResolved
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
 
@@ -52,6 +55,7 @@ class EventViewModel : ViewModel() {
         repository.listenToEvents(
             onRoleResolved = { isAdmin ->
                 _isAdmin.value = isAdmin
+                _adminResolved.value = true
                 if (!hasStartedMenuListener) {
                     hasStartedMenuListener = true
                     startMenuSettingsListener(isAdmin)
@@ -142,12 +146,13 @@ class EventViewModel : ViewModel() {
         eventType: EventType,
         visibleToUsers: Boolean,
         allDay: Boolean,
+        pdfUrl: String = "",
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
         repository.addEvent(
             title, date, endDate, note, location, organizer, hasTodoList, activities,
-            eventType, visibleToUsers, allDay, onSuccess, onError
+            eventType, visibleToUsers, allDay, pdfUrl, onSuccess, onError
         )
     }
 
@@ -173,12 +178,13 @@ class EventViewModel : ViewModel() {
         eventType: EventType,
         visibleToUsers: Boolean,
         allDay: Boolean,
+        pdfUrl: String = "",
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
         repository.updateEvent(
             firestoreID, title, date, note, location, organizer, hasTodoList, activities,
-            eventType, visibleToUsers, allDay, onSuccess, onError
+            eventType, visibleToUsers, allDay, pdfUrl, onSuccess, onError
         )
     }
 

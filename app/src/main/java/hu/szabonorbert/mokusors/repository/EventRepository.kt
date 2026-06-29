@@ -13,8 +13,14 @@ fun EventType.firestoreEventType() = if (this == EventType.VACATION) "vacation" 
 fun EventType.firestoreEventKind() = when (this) {
     EventType.GUEST -> "guest"
     EventType.SPEECH -> "speech"
+    EventType.PRIVATE -> "private"
     else -> "none"
 }
+
+private val privateEventEmails = setOf(
+    "laszlo.turk@kk.gov.hu",
+    "tunde.ilona.makkai@kk.gov.hu"
+)
 
 class EventRepository {
 
@@ -22,6 +28,8 @@ class EventRepository {
     private val auth = FirebaseAuth.getInstance()
     private var listener: ListenerRegistration? = null
     private var roleListener: ListenerRegistration? = null
+
+    private var vacationFilter: List<String>? = null
 
     fun listenToEvents(
         onRoleResolved: (isAdmin: Boolean) -> Unit,
@@ -44,6 +52,8 @@ class EventRepository {
                 val role = snapshot?.getString("role") ?: ""
                 val email = user.email?.lowercase() ?: ""
                 val isAdmin = role == "admin" || email == "szabonorbertdtk@gmail.com"
+                @Suppress("UNCHECKED_CAST")
+                vacationFilter = (snapshot?.get("vacationFilter") as? List<*>)?.filterIsInstance<String>()
                 onRoleResolved(isAdmin)
 
                 listener?.remove()
@@ -58,8 +68,23 @@ class EventRepository {
                         onError(eventsError.message ?: "Hiba")
                         return@addSnapshotListener
                     }
+                    val filter = vacationFilter
+                    val canSeePrivate = email in privateEventEmails
                     val events = (eventsSnapshot?.documents ?: emptyList()).mapNotNull { doc ->
-                        parseEvent(doc.data ?: return@mapNotNull null, doc.id)
+                        var event = parseEvent(doc.data ?: return@mapNotNull null, doc.id) ?: return@mapNotNull null
+                        if (event.eventType == EventType.PRIVATE) {
+                            if (!isAdmin) return@mapNotNull null
+                            if (!canSeePrivate) {
+                                event = event.copy(
+                                    title = "Személyes elfoglaltság",
+                                    location = "", note = "", pdfUrl = "", hasTodoList = false
+                                )
+                            }
+                        }
+                        if (isAdmin && event.eventType == EventType.VACATION && !filter.isNullOrEmpty()) {
+                            if (event.vacationPeople.none { it in filter }) return@mapNotNull null
+                        }
+                        event
                     }.sortedBy { it.date }
                     onEvents(events)
                 }
@@ -85,6 +110,7 @@ class EventRepository {
         eventType: EventType,
         visibleToUsers: Boolean,
         allDay: Boolean,
+        pdfUrl: String = "",
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -111,6 +137,9 @@ class EventRepository {
         )
         if (endDate != null) {
             data["endsAt"] = com.google.firebase.Timestamp(endDate)
+        }
+        if (pdfUrl.isNotBlank()) {
+            data["pdfName"] = pdfUrl
         }
         db.collection("events").add(data)
             .addOnSuccessListener { onSuccess() }
@@ -163,10 +192,11 @@ class EventRepository {
         eventType: EventType,
         visibleToUsers: Boolean,
         allDay: Boolean,
+        pdfUrl: String = "",
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val data = mapOf<String, Any>(
+        val data = mutableMapOf<String, Any>(
             "title" to title,
             "startsAt" to com.google.firebase.Timestamp(date),
             "allDay" to allDay,
@@ -177,7 +207,8 @@ class EventRepository {
             "eventType" to eventType.firestoreEventType(),
             "eventKind" to eventType.firestoreEventKind(),
             "visibleToUsers" to visibleToUsers,
-            "activities" to activities
+            "activities" to activities,
+            "pdfName" to pdfUrl
         )
         db.collection("events").document(firestoreID).update(data)
             .addOnSuccessListener { onSuccess() }

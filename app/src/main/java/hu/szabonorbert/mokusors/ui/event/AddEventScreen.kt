@@ -2,6 +2,9 @@ package hu.szabonorbert.mokusors.ui.event
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,12 +20,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.storage.FirebaseStorage
 import hu.szabonorbert.mokusors.model.EventType
 import hu.szabonorbert.mokusors.viewmodel.EventViewModel
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 
 private val dateDisplayFmt = SimpleDateFormat("yyyy. MM. dd.", Locale("hu"))
 private val timeDisplayFmt = SimpleDateFormat("HH:mm", Locale("hu"))
@@ -69,6 +78,23 @@ fun AddEventScreen(
 
     var isSaving by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    var pickedPdfUri by remember { mutableStateOf<Uri?>(null) }
+    var pickedPdfName by remember { mutableStateOf("") }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        pickedPdfUri = uri
+        if (uri != null) {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (it.moveToFirst() && nameIndex >= 0) pickedPdfName = it.getString(nameIndex)
+            }
+        }
+    }
+
+    val scope = rememberCoroutineScope()
 
     val eventTypeOptions = listOf(
         EventType.NONE to "Nincs",
@@ -105,24 +131,36 @@ fun AddEventScreen(
                                 )
                             } else {
                                 val activities = if (hasTodoList) selectedActivities.toList() else emptyList()
-                                eventViewModel.addEvent(
-                                    title = title,
-                                    date = startDate,
-                                    endDate = if (allDay) null else endDate,
-                                    note = note,
-                                    location = location,
-                                    organizer = organizer,
-                                    hasTodoList = hasTodoList,
-                                    activities = activities,
-                                    eventType = eventType,
-                                    visibleToUsers = visibleToUsers,
-                                    allDay = allDay,
-                                    onSuccess = {
-                                        sendAdminEventNotification(title, startDate)
-                                        onBack()
-                                    },
-                                    onError = { msg -> isSaving = false; errorMsg = msg }
-                                )
+                                scope.launch {
+                                    val resolvedPdfUrl = pickedPdfUri?.let { uri ->
+                                        try {
+                                            val storageRef = FirebaseStorage.getInstance().reference
+                                                .child("events/${System.currentTimeMillis()}-${java.util.UUID.randomUUID()}.pdf")
+                                            val stream = context.contentResolver.openInputStream(uri)!!
+                                            withContext(Dispatchers.IO) { storageRef.putStream(stream).await(); stream.close() }
+                                            storageRef.downloadUrl.await().toString()
+                                        } catch (e: Exception) { "" }
+                                    } ?: ""
+                                    eventViewModel.addEvent(
+                                        title = title,
+                                        date = startDate,
+                                        endDate = if (allDay) null else endDate,
+                                        note = note,
+                                        location = location,
+                                        organizer = organizer,
+                                        hasTodoList = hasTodoList,
+                                        activities = activities,
+                                        eventType = eventType,
+                                        visibleToUsers = visibleToUsers,
+                                        allDay = allDay,
+                                        pdfUrl = resolvedPdfUrl,
+                                        onSuccess = {
+                                            sendAdminEventNotification(title, startDate)
+                                            onBack()
+                                        },
+                                        onError = { msg -> isSaving = false; errorMsg = msg }
+                                    )
+                                }
                             }
                         },
                         enabled = canSave && !isSaving
@@ -364,6 +402,44 @@ fun AddEventScreen(
                     }
                     Switch(checked = visibleToUsers, onCheckedChange = { visibleToUsers = it })
                 }
+
+                HorizontalDivider()
+
+                // PDF invite attachment
+                Text("PDF meghívó", fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (pickedPdfUri != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, null,
+                                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            Text(pickedPdfName.ifBlank { "PDF csatolva" },
+                                fontSize = 14.sp, maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { pickedPdfUri = null; pickedPdfName = "" }) {
+                            Icon(Icons.Default.Close, null)
+                        }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { pdfPicker.launch("application/pdf") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.AttachFile, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("PDF meghívó csatolása")
+                    }
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -435,7 +511,7 @@ private fun sendAdminEventNotification(title: String, date: Date) {
     val eventDateStr = SimpleDateFormat("yyyy. MM. dd.", Locale("hu")).format(date)
     FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.addOnSuccessListener { result ->
         val token = result.token ?: return@addOnSuccessListener
-        Thread {
+        CoroutineScope(Dispatchers.IO).launch {
             try {
                 val conn = URL("https://mokusors-admin.vercel.app/api/admin/notifications/admin-event")
                     .openConnection() as HttpURLConnection
@@ -448,6 +524,6 @@ private fun sendAdminEventNotification(title: String, date: Date) {
                 conn.responseCode
                 conn.disconnect()
             } catch (_: Exception) {}
-        }.start()
+        }
     }
 }

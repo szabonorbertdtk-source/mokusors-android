@@ -8,39 +8,93 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import hu.szabonorbert.mokusors.MainActivity
 import hu.szabonorbert.mokusors.R
 import java.util.Date
 
-// Listens to Firestore notification collections (like iOS AppNotificationStore)
-// and shows local Android notifications for new entries
+// Mirrors iOS AppNotificationStore: admins listen to both collections, users only to userAppNotifications
 object AppNotificationManager {
 
-    private var listener: ListenerRegistration? = null
+    private var adminListener: ListenerRegistration? = null
+    private var userListener: ListenerRegistration? = null
+    private var settingsListener: ListenerRegistration? = null
     private val seenIds = mutableSetOf<String>()
     private var startedAt = Date()
-    private var isAdmin = false
+    private var activeIsAdmin = false
+    private var notifSettings: Map<String, Any> = emptyMap()
+
+    private val contentTypeToSettingKey = mapOf(
+        "dataSheet" to "dataSheets",
+        "program" to "programs",
+        "resume" to "resumes",
+        "offer" to "marketplace",
+        "document" to "documents",
+        "photo" to "photos",
+        "inventory" to "inventory",
+        "institutionalEvent" to "institutionalEvents"
+    )
 
     fun start(context: Context, isAdmin: Boolean) {
-        val collection = if (isAdmin) "appNotifications" else "userAppNotifications"
-        if (listener != null && this.isAdmin == isAdmin) return
+        if (activeIsAdmin == isAdmin) {
+            val alreadyRunning = if (isAdmin) adminListener != null && userListener != null
+                                 else userListener != null
+            if (alreadyRunning) return
+        }
 
-        this.isAdmin = isAdmin
         stop()
         startedAt = Date()
+        activeIsAdmin = isAdmin
         seenIds.clear()
 
         val uid = FirebaseAuth.getInstance().currentUser?.uid
 
-        listener = FirebaseFirestore.getInstance()
+        if (uid != null) {
+            settingsListener = FirebaseFirestore.getInstance()
+                .collection("users").document(uid)
+                .collection("settings").document("notifications")
+                .addSnapshotListener { snap, _ ->
+                    notifSettings = snap?.data ?: emptyMap()
+                }
+        }
+
+        // Always listen to userAppNotifications (same as iOS)
+        userListener = makeListener(context, "userAppNotifications", uid, isAdmin)
+
+        // Admins also listen to appNotifications (same as iOS)
+        if (isAdmin) {
+            adminListener = makeListener(context, "appNotifications", uid, isAdmin)
+        }
+    }
+
+    fun stop() {
+        adminListener?.remove()
+        userListener?.remove()
+        settingsListener?.remove()
+        adminListener = null
+        userListener = null
+        settingsListener = null
+        seenIds.clear()
+        notifSettings = emptyMap()
+        activeIsAdmin = false
+    }
+
+    private fun makeListener(
+        context: Context,
+        collection: String,
+        uid: String?,
+        isAdmin: Boolean
+    ): ListenerRegistration =
+        FirebaseFirestore.getInstance()
             .collection(collection)
-            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(20)
             .addSnapshotListener { snap, _ ->
                 snap?.documentChanges?.forEach { change ->
-                    if (change.type != com.google.firebase.firestore.DocumentChange.Type.ADDED) return@forEach
+                    if (change.type != DocumentChange.Type.ADDED) return@forEach
                     val doc = change.document
                     if (!seenIds.add(doc.id)) return@forEach
 
@@ -48,25 +102,32 @@ object AppNotificationManager {
                     val createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: return@forEach
                     if (createdAt.before(Date(startedAt.time - 2000))) return@forEach
 
-                    val title = (data["title"] as? String)?.trim() ?: return@forEach
-                    if (title.isEmpty()) return@forEach
+                    val title = (data["title"] as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: return@forEach
                     val body = (data["body"] as? String)?.trim() ?: ""
                     val type = (data["type"] as? String)?.trim() ?: ""
+                    val contentType = (data["contentType"] as? String)?.trim() ?: ""
                     val targetUid = (data["targetUid"] as? String)?.trim() ?: ""
 
                     if (type == "deadline-task-reminder" && !isAdmin) return@forEach
-                    // Targeted notifications: only show if targetUid matches or empty
-                    if (!isAdmin && targetUid.isNotEmpty() && uid != null && targetUid != uid) return@forEach
+
+                    if (targetUid.isNotEmpty() && uid != null && targetUid != uid) return@forEach
+
+                    val settingKey = notificationSettingKey(type, contentType)
+                    if (settingKey != null && notifSettings[settingKey] == false) return@forEach
 
                     showNotification(context, title, body)
                 }
             }
-    }
 
-    fun stop() {
-        listener?.remove()
-        listener = null
-        seenIds.clear()
+    private fun notificationSettingKey(type: String, contentType: String): String? {
+        if (type == "deadline-task-reminder" || type.startsWith("deadline-task")) return "deadlineTasks"
+        if (type == "institutional-event-created" || contentType == "institutionalEvent") return "institutionalEvents"
+        if (type == "program-created" || contentType == "program") return "programs"
+        if (type == "dataSheet-created" || contentType == "dataSheet") return "dataSheets"
+        if (type == "resume-created" || contentType == "resume") return "resumes"
+        if (type == "offer-created" || contentType == "offer" || type == "marketplace-offer-created") return "marketplace"
+        if (type == "inventory_new_item" || type == "inventory_reserved") return "inventory"
+        return contentTypeToSettingKey[contentType]
     }
 
     private fun showNotification(context: Context, title: String, body: String) {

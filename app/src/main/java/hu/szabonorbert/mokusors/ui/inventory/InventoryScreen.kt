@@ -1,5 +1,9 @@
 package hu.szabonorbert.mokusors.ui.inventory
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -29,11 +33,16 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 
 data class InventoryItem(
     val id: String,
@@ -73,6 +82,14 @@ fun InventoryScreen(isAdmin: Boolean, onBack: () -> Unit) {
     var filterCondition by remember { mutableStateOf("all") }
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedItem by remember { mutableStateOf<InventoryItem?>(null) }
+    var cachedInstitutionName by remember { mutableStateOf("") }
+
+    LaunchedEffect(currentUid) {
+        if (currentUid.isNotBlank()) {
+            db.collection("users").document(currentUid).get()
+                .addOnSuccessListener { cachedInstitutionName = it.getString("institutionName") ?: "" }
+        }
+    }
 
     val teal = Color(0xFF30B0C7)
 
@@ -118,7 +135,7 @@ fun InventoryScreen(isAdmin: Boolean, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Leltár", fontWeight = FontWeight.SemiBold) },
+                title = { Text("Eszköztár", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
                 actions = {
                     if (isAdmin) {
@@ -225,28 +242,24 @@ fun InventoryScreen(isAdmin: Boolean, onBack: () -> Unit) {
             item = null,
             onDismiss = { showAddDialog = false },
             onSave = { title, desc, dims, cond, imgUrl ->
-                val userDoc = db.collection("users").document(currentUid)
-                userDoc.get().addOnSuccessListener { snap ->
-                    val institution = snap?.getString("institutionName") ?: ""
-                    db.collection("inventory").add(
-                        mapOf(
-                            "title" to title,
-                            "description" to desc,
-                            "dimensions" to dims,
-                            "condition" to cond,
-                            "imageUrl" to imgUrl,
-                            "createdBy" to currentUid,
-                            "createdByName" to currentName,
-                            "institutionName" to institution,
-                            "createdAt" to FieldValue.serverTimestamp(),
-                            "reservedBy" to null,
-                            "reservedByName" to null,
-                            "reservedAt" to null,
-                            "deleted" to false
-                        )
+                db.collection("inventory").add(
+                    mapOf(
+                        "title" to title,
+                        "description" to desc,
+                        "dimensions" to dims,
+                        "condition" to cond,
+                        "imageUrl" to imgUrl,
+                        "createdBy" to currentUid,
+                        "createdByName" to currentName,
+                        "institutionName" to cachedInstitutionName,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "reservedBy" to null,
+                        "reservedByName" to null,
+                        "reservedAt" to null,
+                        "deleted" to false
                     )
-                    sendInventoryNotification(auth, "new_item", title, null)
-                }
+                )
+                sendInventoryNotification(auth, "new_item", title, null)
                 showAddDialog = false
             }
         )
@@ -446,22 +459,34 @@ private fun InventoryFormDialog(
     onDismiss: () -> Unit,
     onSave: (String, String, String, String, String) -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf(item?.title ?: "") }
     var description by remember { mutableStateOf(item?.description ?: "") }
     var dimensions by remember { mutableStateOf(item?.dimensions ?: "") }
     var condition by remember { mutableStateOf(item?.condition ?: "jó") }
-    var imageUrl by remember { mutableStateOf(item?.imageUrl ?: "") }
+    var existingImageUrl by remember { mutableStateOf(item?.imageUrl ?: "") }
+    var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf("") }
 
     val conditionOptions = listOf("új", "jó", "használt")
+    val teal = Color(0xFF30B0C7)
 
-    Dialog(onDismissRequest = onDismiss) {
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri -> pickedUri = uri }
+
+    val displayImageUrl = pickedUri?.toString() ?: existingImageUrl
+
+    Dialog(onDismissRequest = { if (!saving) onDismiss() }) {
         Card(shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(0.dp)) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    if (item == null) "Új eszköz" else "Eszköz szerkesztése",
+                    if (item == null) "Eszköz felajánlása" else "Eszköz szerkesztése",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
@@ -489,13 +514,49 @@ private fun InventoryFormDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
-                    value = imageUrl,
-                    onValueChange = { imageUrl = it },
-                    label = { Text("Kép URL (opcionális)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+
+                // Photo section
+                Text("Fotó", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                if (displayImageUrl.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(displayImageUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        IconButton(
+                            onClick = { pickedUri = null; existingImageUrl = "" },
+                            modifier = Modifier.align(Alignment.TopEnd)
+                                .padding(4.dp)
+                                .size(32.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        ) {
+                            Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = teal)
+                    ) {
+                        Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Kép hozzáadása")
+                    }
+                }
 
                 Text("Állapot", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -508,15 +569,51 @@ private fun InventoryFormDialog(
                     }
                 }
 
+                if (errorMsg.isNotBlank()) {
+                    Text(errorMsg, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Mégse") }
+                    TextButton(onClick = onDismiss, enabled = !saving) { Text("Mégse") }
                     Button(
-                        onClick = { if (title.isNotBlank()) onSave(title, description, dimensions, condition, imageUrl) },
-                        enabled = title.isNotBlank()
-                    ) { Text("Mentés") }
+                        onClick = {
+                            if (title.isBlank()) return@Button
+                            val uri = pickedUri
+                            if (uri != null) {
+                                saving = true
+                                errorMsg = ""
+                                scope.launch {
+                                    try {
+                                        val storageRef = FirebaseStorage.getInstance().reference
+                                            .child("inventory/${System.currentTimeMillis()}-${UUID.randomUUID()}.jpg")
+                                        val stream = context.contentResolver.openInputStream(uri)
+                                            ?: throw Exception("Nem sikerült megnyitni a képet")
+                                        withContext(Dispatchers.IO) {
+                                            storageRef.putStream(stream).await()
+                                            stream.close()
+                                        }
+                                        val downloadUrl = storageRef.downloadUrl.await().toString()
+                                        onSave(title, description, dimensions, condition, downloadUrl)
+                                    } catch (e: Exception) {
+                                        errorMsg = "Feltöltési hiba: ${e.message}"
+                                        saving = false
+                                    }
+                                }
+                            } else {
+                                onSave(title, description, dimensions, condition, existingImageUrl)
+                            }
+                        },
+                        enabled = title.isNotBlank() && !saving
+                    ) {
+                        if (saving) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            Text("Mentés")
+                        }
+                    }
                 }
             }
         }
@@ -531,7 +628,7 @@ private fun sendInventoryNotification(
 ) {
     auth.currentUser?.getIdToken(false)?.addOnSuccessListener { result ->
         val token = result.token ?: return@addOnSuccessListener
-        Thread {
+        CoroutineScope(Dispatchers.IO).launch {
             try {
                 val url = URL("https://mokusors-admin.vercel.app/api/inventory/notify")
                 val conn = url.openConnection() as HttpURLConnection
@@ -548,6 +645,6 @@ private fun sendInventoryNotification(
                 conn.responseCode
                 conn.disconnect()
             } catch (_: Exception) {}
-        }.start()
+        }
     }
 }
