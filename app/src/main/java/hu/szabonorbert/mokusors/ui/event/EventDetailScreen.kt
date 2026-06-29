@@ -128,6 +128,7 @@ fun EventDetailScreen(
                     EventType.GUEST -> "Vendég esemény"
                     EventType.SPEECH -> "Köszöntőbeszéd"
                     EventType.VACATION -> "Szabadság"
+                    EventType.PRIVATE -> null
                     EventType.NONE -> null
                 }
                 if (typeLabel != null || (isAdmin && liveEvent.visibleToUsers)) {
@@ -282,6 +283,18 @@ private fun AttachmentRow(att: EventAttachment, onClick: () -> Unit) {
 private fun ChecklistCard(event: CalendarEvent, eventViewModel: EventViewModel) {
     val appColors = LocalAppColors.current
     val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+                as android.app.NotificationManager
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    "mokusors_general", "Mókusörs értesítések",
+                    android.app.NotificationManager.IMPORTANCE_DEFAULT
+                )
+            )
+        }
+    }
     val allItems = listOf(
         Triple("dtk", "DTK részvétel", event.dtkParticipationDone),
         Triple("kk", "KK engedély", event.kkPermissionDone),
@@ -342,18 +355,9 @@ private fun ChecklistCard(event: CalendarEvent, eventViewModel: EventViewModel) 
                             )
                             // Fire local notification when item is marked done
                             if (!isDone) {
-                                val channelId = "mokusors_general"
                                 val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
                                     as android.app.NotificationManager
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                    manager.createNotificationChannel(
-                                        android.app.NotificationChannel(
-                                            channelId, "Mókusörs értesítések",
-                                            android.app.NotificationManager.IMPORTANCE_DEFAULT
-                                        )
-                                    )
-                                }
-                                val notif = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                                val notif = androidx.core.app.NotificationCompat.Builder(context, "mokusors_general")
                                     .setSmallIcon(hu.szabonorbert.mokusors.R.drawable.ic_launcher_foreground)
                                     .setContentTitle("Feladat kész ✓")
                                     .setContentText("$title – ${event.title}")
