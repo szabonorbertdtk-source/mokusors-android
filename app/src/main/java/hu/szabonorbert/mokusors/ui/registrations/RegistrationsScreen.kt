@@ -54,6 +54,7 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
     var registrationsByEventId by remember { mutableStateOf<Map<String, List<RegEntry>>>(emptyMap()) }
     var showFormFor by remember { mutableStateOf<RegEvent?>(null) }
+    var errorMsg by remember { mutableStateOf("") }
 
     // Merge base events with subcollection registrations
     val mergedEvents = remember(events, registrationsByEventId) {
@@ -171,6 +172,8 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 
             tx.update(eventRef, mapOf("slotUsage" to slotUsage,
                 "updatedAt" to now, "updatedAtServer" to FieldValue.serverTimestamp()))
+        }.addOnFailureListener { e ->
+            errorMsg = e.message ?: "Hiba történt"
         }
     }
 
@@ -194,6 +197,8 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             }
             tx.update(eventRef, mapOf("slotUsage" to slotUsage,
                 "updatedAt" to now, "updatedAtServer" to FieldValue.serverTimestamp()))
+        }.addOnFailureListener { e ->
+            errorMsg = e.message ?: "Hiba történt"
         }
     }
 

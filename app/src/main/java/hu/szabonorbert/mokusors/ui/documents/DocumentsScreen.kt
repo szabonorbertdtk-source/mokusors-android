@@ -236,7 +236,11 @@ private fun DocRow(
                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
             )
             .clickable(enabled = doc.fileUrl.isNotBlank()) {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(doc.fileUrl)))
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(doc.fileUrl)))
+                } catch (e: android.content.ActivityNotFoundException) {
+                    // nincs alkalmazás a fájl megnyitásához — csendesen kihagyjuk
+                }
             }
             .padding(if (large) 14.dp else 12.dp)
     ) {

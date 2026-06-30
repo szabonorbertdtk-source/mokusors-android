@@ -304,6 +304,7 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 
     fun saveRow() {
         val sheetId = selectedSheetId ?: return
+        if (uid.isBlank()) return
         isSaving = true
         savedMessage = ""
         errorMsg = ""
@@ -333,6 +334,7 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     fun saveMultiRow() {
         val sheetId = selectedSheetId ?: return
         val editId = editingMultiRowId ?: return
+        if (uid.isBlank()) return
         isSaving = true
         savedMessage = ""
         errorMsg = ""
