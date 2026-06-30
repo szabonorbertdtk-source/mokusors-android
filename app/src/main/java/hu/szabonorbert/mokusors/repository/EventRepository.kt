@@ -33,6 +33,7 @@ class EventRepository {
 
     fun listenToEvents(
         onRoleResolved: (isAdmin: Boolean) -> Unit,
+        onPenzugy: () -> Unit = {},
         onEvents: (List<CalendarEvent>) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -52,8 +53,15 @@ class EventRepository {
                 val role = snapshot?.getString("role") ?: ""
                 val email = user.email?.lowercase() ?: ""
                 val isAdmin = role == "admin" || email == "szabonorbertdtk@gmail.com"
+                val isPenzugy = role == "penzugy"
                 @Suppress("UNCHECKED_CAST")
                 vacationFilter = (snapshot?.get("vacationFilter") as? List<*>)?.filterIsInstance<String>()
+
+                if (isPenzugy) {
+                    onPenzugy()
+                    return@addSnapshotListener
+                }
+
                 onRoleResolved(isAdmin)
 
                 listener?.remove()

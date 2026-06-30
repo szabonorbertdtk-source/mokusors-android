@@ -46,6 +46,21 @@ import hu.szabonorbert.mokusors.viewmodel.AuthState
 import hu.szabonorbert.mokusors.viewmodel.AuthViewModel
 import hu.szabonorbert.mokusors.viewmodel.EventViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
 
@@ -132,6 +147,7 @@ fun MokusorsApp(
     val authState by authViewModel.authState.collectAsState()
     val isAdmin by eventViewModel.isAdmin.collectAsState()
     val adminResolved by eventViewModel.adminResolved.collectAsState()
+    val isPenzugy by eventViewModel.isPenzugy.collectAsState()
     val navController = rememberNavController()
     var selectedEvent by remember { mutableStateOf<CalendarEvent?>(null) }
     var eventToEdit by remember { mutableStateOf<CalendarEvent?>(null) }
@@ -190,7 +206,38 @@ fun MokusorsApp(
     when (authState) {
         is AuthState.Loading -> {}
         is AuthState.LoggedOut, is AuthState.Error -> LoginScreen(authViewModel)
-        is AuthState.LoggedIn -> {
+        is AuthState.LoggedIn -> if (isPenzugy) {
+            Column(
+                modifier = androidx.compose.ui.Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    modifier = androidx.compose.ui.Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
+                Text(
+                    "Nincs hozzáférés",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = androidx.compose.ui.Modifier.height(8.dp))
+                Text(
+                    "Ez az alkalmazás pénzügyi munkatársak számára nem elérhető. A kötelezettségvállalásokat a webes felületen kezelheti.",
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = androidx.compose.ui.Modifier.height(24.dp))
+                Button(onClick = { authViewModel.logout() }) {
+                    Text("Kijelentkezés")
+                }
+            }
+        } else {
             NavHost(navController, startDestination = "calendar") {
                 composable("calendar") {
                     CalendarScreen(
@@ -264,6 +311,6 @@ fun MokusorsApp(
                     InventoryScreen(isAdmin = isAdmin) { navController.popBackStack() }
                 }
             }
-        }
+        } // else isPenzugy
     }
 }

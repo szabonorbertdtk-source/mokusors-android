@@ -40,6 +40,9 @@ class EventViewModel : ViewModel() {
     private val _adminResolved = MutableStateFlow(false)
     val adminResolved: StateFlow<Boolean> = _adminResolved
 
+    private val _isPenzugy = MutableStateFlow(false)
+    val isPenzugy: StateFlow<Boolean> = _isPenzugy
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
 
@@ -60,6 +63,11 @@ class EventViewModel : ViewModel() {
                     hasStartedMenuListener = true
                     startMenuSettingsListener(isAdmin)
                 }
+            },
+            onPenzugy = {
+                _isPenzugy.value = true
+                _adminResolved.value = true
+                _isLoading.value = false
             },
             onEvents = { events ->
                 _events.value = events
