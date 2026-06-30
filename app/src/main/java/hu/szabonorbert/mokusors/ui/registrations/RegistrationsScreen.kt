@@ -74,20 +74,20 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     val d = doc.data ?: return@mapNotNull null
                     if (d["deleted"] as? Boolean == true) return@mapNotNull null
 
-                    @Suppress("UNCHECKED_CAST")
-                    val slots = (d["slots"] as? List<Map<String, Any>> ?: emptyList()).mapNotNull { s ->
-                        val slotId = s["id"] as? String ?: return@mapNotNull null
-                        val date = when (val v = s["startsAt"]) {
-                            is Timestamp -> v.toDate()
-                            else -> return@mapNotNull null
-                        }
-                        RegSlot(slotId, date, (s["capacity"] as? Long)?.toInt() ?: 1)
-                    }.sortedBy { it.startsAt }
+                    val slots = (d["slots"] as? List<*> ?: emptyList<Any>())
+                        .filterIsInstance<Map<String, Any>>()
+                        .mapNotNull { s ->
+                            val slotId = s["id"] as? String ?: return@mapNotNull null
+                            val date = when (val v = s["startsAt"]) {
+                                is Timestamp -> v.toDate()
+                                else -> return@mapNotNull null
+                            }
+                            RegSlot(slotId, date, (s["capacity"] as? Long)?.toInt() ?: 1)
+                        }.sortedBy { it.startsAt }
 
-                    @Suppress("UNCHECKED_CAST")
-                    val embeddedRegs = (d["registrations"] as? List<Map<String, Any>> ?: emptyList()).mapNotNull { r ->
-                        parseEntry(r, null)
-                    }
+                    val embeddedRegs = (d["registrations"] as? List<*> ?: emptyList<Any>())
+                        .filterIsInstance<Map<String, Any>>()
+                        .mapNotNull { r -> parseEntry(r, null) }
 
                     RegEvent(
                         id = doc.id, title = d["title"] as? String ?: "",

@@ -51,7 +51,9 @@ data class TaskItem(
     val reminderTargetEmail: String,
     val status: String,
     val note: String,
-    val completedBy: String
+    val completedBy: String,
+    val completedDate: String = "",
+    val completedTime: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,7 +98,9 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         reminderTargetEmail = d["reminderTargetEmail"] as? String ?: "",
                         status = status,
                         note = d["note"] as? String ?: "",
-                        completedBy = d["completedBy"] as? String ?: ""
+                        completedBy = d["completedBy"] as? String ?: "",
+                        completedDate = d["completedDate"] as? String ?: "",
+                        completedTime = d["completedTime"] as? String ?: ""
                     )
                 }.sortedWith(compareBy({ it.status == "done" }, { it.deadlineDate }))
                 tasks = list
@@ -106,12 +110,24 @@ fun TasksScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     }
 
     fun markDone(task: TaskItem) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-            .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
+        val nowDate = Date()
+        val cal = Calendar.getInstance().apply { time = nowDate }
+        val completedDate = "%04d-%02d-%02d".format(
+            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
+        val completedTime = "%02d:%02d".format(
+            cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        val completedAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(nowDate)
         val displayName = FirebaseAuth.getInstance().currentUser?.displayName
             ?.takeIf { it.isNotBlank() } ?: userEmail
         FirebaseFirestore.getInstance().collection("deadlineTasks").document(task.id)
-            .update(mapOf("status" to "done", "completedAt" to now, "completedBy" to displayName))
+            .update(mapOf(
+                "status" to "done",
+                "completedAt" to completedAt,
+                "completedDate" to completedDate,
+                "completedTime" to completedTime,
+                "completedBy" to displayName
+            ))
     }
 
     fun markIrrelevant(task: TaskItem) {
@@ -248,9 +264,19 @@ private fun TaskCard(
                     modifier = Modifier.padding(start = 32.dp))
             }
 
-            if (isDone && task.completedBy.isNotBlank()) {
-                Text("Elvégezte: ${task.completedBy}", fontSize = 12.sp,
-                    color = Color(0xFF34C759), modifier = Modifier.padding(start = 32.dp))
+            if (isDone) {
+                val meta = buildString {
+                    if (task.completedDate.isNotEmpty()) {
+                        append("Kész: ${task.completedDate.replace("-", ".")} ${task.completedTime}")
+                        if (task.completedBy.isNotBlank()) append(" · ${task.completedBy}")
+                    } else if (task.completedBy.isNotBlank()) {
+                        append("Elvégezte: ${task.completedBy}")
+                    }
+                }
+                if (meta.isNotEmpty()) {
+                    Text(meta, fontSize = 12.sp, color = Color(0xFF34C759),
+                        modifier = Modifier.padding(start = 32.dp))
+                }
             }
 
             if (!isDone && isOwner) {

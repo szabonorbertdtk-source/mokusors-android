@@ -1,14 +1,26 @@
 package hu.szabonorbert.mokusors.util
 
-import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
-import java.util.Locale
 
 object HungarianCalendar {
 
-    private val monthDayFmt = SimpleDateFormat("MM-dd", Locale.US)
-    private val fullDateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private fun Date.toMonthDay(): String {
+        val c = Calendar.getInstance().apply { time = this@toMonthDay }
+        return "%02d-%02d".format(c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
+    }
+
+    private fun Date.toFullDate(): String {
+        val c = Calendar.getInstance().apply { time = this@toFullDate }
+        return "%04d-%02d-%02d".format(
+            c.get(Calendar.YEAR),
+            c.get(Calendar.MONTH) + 1,
+            c.get(Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    private fun Calendar.toMonthDay(): String =
+        "%02d-%02d".format(get(Calendar.MONTH) + 1, get(Calendar.DAY_OF_MONTH))
 
     // Fixed public holidays (month-day, year-independent)
     private val fixedHolidays = setOf(
@@ -67,9 +79,9 @@ object HungarianCalendar {
             val easterMonday = (easter.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
             val whitMonday = (easter.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 50) }
             setOf(
-                monthDayFmt.format(goodFriday.time),
-                monthDayFmt.format(easterMonday.time),
-                monthDayFmt.format(whitMonday.time)
+                goodFriday.toMonthDay(),
+                easterMonday.toMonthDay(),
+                whitMonday.toMonthDay()
             )
         }
     }
@@ -77,15 +89,15 @@ object HungarianCalendar {
     fun isHoliday(date: Date): Boolean {
         val cal = Calendar.getInstance().apply { time = date }
         val year = cal.get(Calendar.YEAR)
-        val monthDay = monthDayFmt.format(date)
-        val fullDate = fullDateFmt.format(date)
+        val monthDay = date.toMonthDay()
+        val fullDate = date.toFullDate()
         return fixedHolidays.contains(monthDay) ||
                easterBasedHolidays(year).contains(monthDay) ||
                extraHolidays.contains(fullDate)
     }
 
     fun isTransferredWorkday(date: Date): Boolean {
-        return transferredWorkdays.contains(fullDateFmt.format(date))
+        return transferredWorkdays.contains(date.toFullDate())
     }
 
     // Returns true if the date should be treated as a non-working day

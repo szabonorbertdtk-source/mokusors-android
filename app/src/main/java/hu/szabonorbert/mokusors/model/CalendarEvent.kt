@@ -50,26 +50,28 @@ data class CalendarEvent(
 
     val completedTaskCount get(): Int {
         if (!hasTodoList || isVacation) return 0
-        return listOfNotNull(
-            if (activeActivities.contains("dtk") && dtkParticipationDone) true else null,
-            if (activeActivities.contains("kk") && kkPermissionDone) true else null,
-            if (activeActivities.contains("press") && pressInviteDone) true else null,
-            if (activeActivities.contains("ph") && phBackgroundDone) true else null,
-            if (activeActivities.contains("catering") && cateringDone) true else null,
-            if (activeActivities.contains("gifts") && giftsDone) true else null,
-            if (activeActivities.contains("certificate") && certificateDone) true else null,
-        ).size
+        val act = activeActivities
+        var count = 0
+        if (act.contains("dtk") && dtkParticipationDone) count++
+        if (act.contains("kk") && kkPermissionDone) count++
+        if (act.contains("press") && pressInviteDone) count++
+        if (act.contains("ph") && phBackgroundDone) count++
+        if (act.contains("catering") && cateringDone) count++
+        if (act.contains("gifts") && giftsDone) count++
+        if (act.contains("certificate") && certificateDone) count++
+        return count
     }
 
     val totalTaskCount get() = if (hasTodoList && !isVacation) activeActivities.size else 0
 }
 
 enum class EventType {
-    NONE, GUEST, SPEECH, VACATION;
+    NONE, GUEST, SPEECH, VACATION, PRIVATE;
 
     companion object {
         fun fromFirestore(eventType: String?, eventKind: String?): EventType {
             if (eventType == "vacation") return VACATION
+            if (eventKind == "private") return PRIVATE
             if (eventKind == "guest") return GUEST
             if (eventKind == "speech") return SPEECH
             return NONE

@@ -108,7 +108,31 @@ fun CalendarScreen(
         onDispose { r1.remove(); r2.remove() }
     }
 
-    val now = Date()
+    // All tasks listener (task mode calendar)
+    var allTasks by remember { mutableStateOf<List<SimpleTask>>(emptyList()) }
+    DisposableEffect(isAdmin) {
+        if (!isAdmin) { allTasks = emptyList(); return@DisposableEffect onDispose {} }
+        val reg = FirebaseFirestore.getInstance().collection("deadlineTasks")
+            .addSnapshotListener { snap, _ ->
+                allTasks = (snap?.documents ?: emptyList()).mapNotNull { doc ->
+                    val d = doc.data ?: return@mapNotNull null
+                    val status = d["status"] as? String ?: "progress"
+                    if (status == "irrelevant") return@mapNotNull null
+                    SimpleTask(
+                        id = doc.id, title = d["title"] as? String ?: "",
+                        owner = d["owner"] as? String ?: "", status = status,
+                        year = (d["year"] as? Long)?.toInt() ?: 0,
+                        month = (d["month"] as? Long)?.toInt() ?: 0,
+                        day = (d["day"] as? Long)?.toInt() ?: 0,
+                        completedDate = d["completedDate"] as? String ?: "",
+                        completedTime = d["completedTime"] as? String ?: ""
+                    )
+                }
+            }
+        onDispose { reg.remove() }
+    }
+
+    val now = remember { Date() }
     val selectedDayEvents = remember(events, selectedDate) { eventViewModel.eventsForDay(selectedDate) }
     val redCount = remember(events) {
         events.count { ev ->
@@ -225,7 +249,7 @@ fun CalendarScreen(
             }
         }
 
-        if (isAdmin && widgetShowEvents.value) {
+        if (isAdmin && !widgetShowTasks.value) {
             item {
                 StatusCardsRow(
                     red = redCount, yellow = yellowCount, green = greenCount,
@@ -240,7 +264,7 @@ fun CalendarScreen(
             }
         }
 
-        if (isAdmin && widgetShowTasks.value) {
+        if (isAdmin) {
             item { WidgetTodayTasksCard() }
         }
 
@@ -252,12 +276,20 @@ fun CalendarScreen(
                 onEventClick = onEventClick,
                 selectedDayEvents = selectedDayEvents,
                 isAdmin = isAdmin,
-                appColors = appColors
+                appColors = appColors,
+                widgetShowTasks = widgetShowTasks.value,
+                allTasks = allTasks
             )
         }
 
         if (isAdmin) {
-            item { WeeklyOverviewCard(thisWeekEvents, onEventClick, appColors) }
+            item {
+                WeeklyOverviewCard(
+                    thisWeekEvents, onEventClick, appColors,
+                    widgetShowTasks = widgetShowTasks.value,
+                    allTasks = allTasks
+                )
+            }
         }
     }
     } // end Scaffold
@@ -318,7 +350,7 @@ private fun MenuBar(
             if (menu.photos)
                 MenuBtn(Icons.Default.Photo, "Média", Color(0xFF30B0C7), Modifier.weight(1f), onPhotosClick)
             if (menu.inventory)
-                MenuBtn(Icons.Default.Inventory2, "Leltár", Color(0xFF34C759), Modifier.weight(1f), onInventoryClick)
+                MenuBtn(Icons.Default.Inventory2, "Eszköztár", Color(0xFF34C759), Modifier.weight(1f), onInventoryClick)
             if (menu.documents)
                 MenuBtn(Icons.Default.Folder, "Backoffice", Color(0xFF5856D6), Modifier.weight(1f), onDocumentsClick)
             MenuBtn(Icons.Default.Settings, "Beállítások", Color(0xFF8E8E93), Modifier.weight(1f), onSettingsClick)
@@ -425,7 +457,9 @@ private fun CalendarCard(
     onEventClick: (CalendarEvent) -> Unit,
     selectedDayEvents: List<CalendarEvent>,
     isAdmin: Boolean,
-    appColors: AppColors
+    appColors: AppColors,
+    widgetShowTasks: Boolean = false,
+    allTasks: List<SimpleTask> = emptyList()
 ) {
     AppCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -448,9 +482,9 @@ private fun CalendarCard(
                 }) { Icon(Icons.Default.ChevronRight, null, tint = appColors.statusBlue) }
             }
 
-            MonthGrid(events, selectedDate, onDateSelected, appColors)
+            MonthGrid(events, selectedDate, onDateSelected, appColors, widgetShowTasks, allTasks)
             HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-            SelectedDayAgenda(selectedDate, selectedDayEvents, isAdmin, onEventClick, appColors)
+            SelectedDayAgenda(selectedDate, selectedDayEvents, isAdmin, onEventClick, appColors, widgetShowTasks, allTasks)
         }
     }
 }
@@ -462,7 +496,9 @@ private fun MonthGrid(
     events: List<CalendarEvent>,
     selectedDate: Date,
     onDateSelected: (Date) -> Unit,
-    appColors: AppColors
+    appColors: AppColors,
+    widgetShowTasks: Boolean = false,
+    allTasks: List<SimpleTask> = emptyList()
 ) {
     val cal = Calendar.getInstance().apply { time = selectedDate }
     val year = cal.get(Calendar.YEAR)
@@ -473,6 +509,51 @@ private fun MonthGrid(
 
     val today = startOfDay(Date())
     val selectedDay = startOfDay(selectedDate)
+
+    val dayEventsMap = remember(events, year, month) {
+        val map = HashMap<Int, List<CalendarEvent>>(daysInMonth * 2)
+        for (dayNum in 1..daysInMonth) {
+            val cellDate = makeDate(year, month, dayNum, 0, 0, 0)
+            val cellEnd = makeDate(year, month, dayNum, 23, 59, 59)
+            val dow = Calendar.getInstance().apply { time = cellDate }.get(Calendar.DAY_OF_WEEK)
+            val transferred = HungarianCalendar.isTransferredWorkday(cellDate)
+            val weekend = (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) && !transferred
+            val nonWorking = weekend || HungarianCalendar.isHoliday(cellDate)
+            map[dayNum] = events.filter { ev ->
+                if (ev.isVacation && nonWorking) return@filter false
+                ev.date <= cellEnd && ev.endDate >= cellDate
+            }.sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
+        }
+        map
+    }
+
+    // Task mode: vacations per day
+    val dayVacationsMap = remember(events, year, month) {
+        val map = HashMap<Int, List<CalendarEvent>>(daysInMonth * 2)
+        for (dayNum in 1..daysInMonth) {
+            val cellDate = makeDate(year, month, dayNum, 0, 0, 0)
+            val cellEnd = makeDate(year, month, dayNum, 23, 59, 59)
+            val dow = Calendar.getInstance().apply { time = cellDate }.get(Calendar.DAY_OF_WEEK)
+            val transferred = HungarianCalendar.isTransferredWorkday(cellDate)
+            val weekend = (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) && !transferred
+            val nonWorking = weekend || HungarianCalendar.isHoliday(cellDate)
+            map[dayNum] = if (nonWorking) emptyList() else events.filter { ev ->
+                ev.isVacation && ev.date <= cellEnd && ev.endDate >= cellDate
+            }
+        }
+        map
+    }
+
+    // Task mode: tasks per day (month+1 because tasks store 1-based month)
+    val dayTasksMap = remember(allTasks, year, month) {
+        val map = HashMap<Int, List<SimpleTask>>(daysInMonth * 2)
+        for (dayNum in 1..daysInMonth) {
+            map[dayNum] = allTasks.filter {
+                it.year == year && it.month == (month + 1) && it.day == dayNum
+            }
+        }
+        map
+    }
 
     Column {
         Row(Modifier.fillMaxWidth()) {
@@ -492,19 +573,24 @@ private fun MonthGrid(
                     if (dayNum < 1 || dayNum > daysInMonth) { Box(Modifier.weight(1f).height(76.dp)); continue }
 
                     val cellDate = makeDate(year, month, dayNum, 0, 0, 0)
-                    val cellEnd = makeDate(year, month, dayNum, 23, 59, 59)
                     val dow = Calendar.getInstance().apply { time = cellDate }.get(Calendar.DAY_OF_WEEK)
                     val isTransferredWorkday = HungarianCalendar.isTransferredWorkday(cellDate)
                     val isWeekend = (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) && !isTransferredWorkday
                     val isHoliday = HungarianCalendar.isHoliday(cellDate)
-                    val isNonWorking = isWeekend || isHoliday
-                    val dayEvents = events.filter { event ->
-                        if (event.isVacation && isNonWorking) return@filter false
-                        event.date <= cellEnd && event.endDate >= cellDate
-                    }.sortedWith(compareBy({ if (it.isVacation) 1 else 0 }, { it.date }))
+                    val dayEvents = if (widgetShowTasks) dayVacationsMap[dayNum] ?: emptyList()
+                                    else dayEventsMap[dayNum] ?: emptyList()
+                    val dayTasks = if (widgetShowTasks) dayTasksMap[dayNum] ?: emptyList()
+                                   else emptyList()
                     val isSelected = cellDate == selectedDay
                     val isToday = cellDate == today
                     val blue = appColors.statusBlue
+                    val orange = Color(0xFFFF9500)
+
+                    val maxPills = 3
+                    // Tasks first, vacations below
+                    val visibleTasks = dayTasks.take(maxPills)
+                    val visibleEvents = dayEvents.take(maxPills - visibleTasks.size)
+                    val hiddenCount = maxOf(0, dayTasks.size - visibleTasks.size) + maxOf(0, dayEvents.size - visibleEvents.size)
 
                     Box(
                         modifier = Modifier.weight(1f).height(76.dp)
@@ -544,7 +630,23 @@ private fun MonthGrid(
                                     }
                                 )
                             }
-                            dayEvents.take(3).forEach { ev ->
+                            // Tasks first (urgency colors), then vacations below
+                            visibleTasks.forEach { task ->
+                                Text(
+                                    task.title.ifEmpty { "Feladat" },
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = Color.White,
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(taskUrgencyColor(task))
+                                        .padding(horizontal = 2.dp, vertical = 1.dp)
+                                        .alpha(if (task.status == "done") 0.65f else 1f)
+                                )
+                            }
+                            visibleEvents.forEach { ev ->
                                 Text(
                                     ev.title,
                                     fontSize = 9.sp,
@@ -558,8 +660,8 @@ private fun MonthGrid(
                                         .padding(horizontal = 2.dp, vertical = 1.dp)
                                 )
                             }
-                            if (dayEvents.size > 3) {
-                                Text("+${dayEvents.size - 3} más", fontSize = 8.sp,
+                            if (hiddenCount > 0) {
+                                Text("+$hiddenCount más", fontSize = 8.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -575,15 +677,71 @@ private fun MonthGrid(
 @Composable
 private fun SelectedDayAgenda(
     selectedDate: Date, events: List<CalendarEvent>,
-    isAdmin: Boolean, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors
+    isAdmin: Boolean, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors,
+    widgetShowTasks: Boolean = false, allTasks: List<SimpleTask> = emptyList()
 ) {
+    val cal = Calendar.getInstance().apply { time = selectedDate }
+    val selYear = cal.get(Calendar.YEAR)
+    val selMonth = cal.get(Calendar.MONTH) + 1
+    val selDay = cal.get(Calendar.DAY_OF_MONTH)
+
+    val displayEvents = if (widgetShowTasks) events.filter { it.isVacation } else events
+    val dayTasks = if (widgetShowTasks) allTasks.filter {
+        it.year == selYear && it.month == selMonth && it.day == selDay &&
+        it.status != "irrelevant"
+    } else emptyList()
+
     Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(dayHeaderFmt.format(selectedDate), fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (events.isEmpty()) {
-            Text("Nincs esemény erre a napra.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+        if (displayEvents.isEmpty() && dayTasks.isEmpty()) {
+            Text(
+                if (widgetShowTasks) "Nincs feladat vagy szabadság erre a napra."
+                else "Nincs esemény erre a napra.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp
+            )
         } else {
-            events.forEach { EventRow(it, onEventClick, isAdmin, appColors) }
+            // Tasks first, vacations below
+            dayTasks.forEach { task ->
+                val isDone = task.status == "done"
+                val overdue = isTaskOverdue(task)
+                val color = taskUrgencyColor(task)
+                val icon = when {
+                    isDone -> Icons.Default.CheckCircle
+                    overdue -> Icons.Default.Error
+                    else -> Icons.Default.RadioButtonUnchecked
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .alpha(if (overdue) 0.6f else 1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(color.copy(alpha = 0.08f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(imageVector = icon, contentDescription = null,
+                        tint = color, modifier = Modifier.size(20.dp))
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            task.title.ifEmpty { "Névtelen feladat" },
+                            fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                            textDecoration = if (overdue) TextDecoration.LineThrough else TextDecoration.None
+                        )
+                        if (task.owner.isNotBlank()) {
+                            Text(task.owner, fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (isDone && task.completedDate.isNotEmpty()) {
+                            Text(
+                                "Kész: ${task.completedDate.replace("-", ".")} ${task.completedTime}",
+                                fontSize = 12.sp, color = color
+                            )
+                        }
+                    }
+                }
+            }
+            displayEvents.forEach { EventRow(it, onEventClick, isAdmin, appColors) }
         }
     }
 }
@@ -591,7 +749,13 @@ private fun SelectedDayAgenda(
 // ── Weekly overview ───────────────────────────────────────────────────────────
 
 @Composable
-private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (CalendarEvent) -> Unit, appColors: AppColors) {
+private fun WeeklyOverviewCard(
+    events: List<CalendarEvent>,
+    onEventClick: (CalendarEvent) -> Unit,
+    appColors: AppColors,
+    widgetShowTasks: Boolean = false,
+    allTasks: List<SimpleTask> = emptyList()
+) {
     val weekRangeText = remember {
         val fmt = SimpleDateFormat("yyyy. MMMM d.", Locale("hu"))
         val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY; time = Date() }
@@ -600,18 +764,87 @@ private fun WeeklyOverviewCard(events: List<CalendarEvent>, onEventClick: (Calen
         cal.add(Calendar.DAY_OF_YEAR, 6)
         "${fmt.format(monday)} – ${fmt.format(cal.time)}"
     }
+
+    val weekTasks = remember(allTasks) {
+        val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY; time = Date() }
+        cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+        val weekStart = cal.time
+        cal.add(Calendar.DAY_OF_YEAR, 6)
+        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59)
+        val weekEnd = cal.time
+        allTasks.filter { task ->
+            if (task.status == "irrelevant") return@filter false
+            val d = makeDate(task.year, task.month - 1, task.day, 0, 0, 0)
+            d >= weekStart && d <= weekEnd
+        }.sortedWith(compareBy({ it.year }, { it.month }, { it.day }))
+    }
+
     AppCard {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Heti összesítő", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(if (widgetShowTasks) "Heti feladatok" else "Heti összesítő",
+                    fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(weekRangeText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (events.isEmpty()) {
-                Text("Ezen a héten nincs esemény.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+            if (widgetShowTasks) {
+                if (weekTasks.isEmpty()) {
+                    Text("Ezen a héten nincs határidős feladat.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                } else {
+                    weekTasks.forEach { task -> WeeklyTaskRow(task) }
+                }
             } else {
-                val now = remember { Date() }
-                events.forEach { event ->
-                    EventRow(event, onEventClick, true, appColors, isPast = event.date.before(now))
+                if (events.isEmpty()) {
+                    Text("Ezen a héten nincs esemény.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                } else {
+                    val now = remember { Date() }
+                    events.forEach { event ->
+                        EventRow(event, onEventClick, true, appColors, isPast = event.date.before(now))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyTaskRow(task: SimpleTask) {
+    val isDone = task.status == "done"
+    val overdue = isTaskOverdue(task)
+    val color = taskUrgencyColor(task)
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .alpha(if (overdue) 0.55f else 1f)
+            .clip(RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = 0.08f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(Modifier.width(4.dp).height(40.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                task.title.ifEmpty { "Névtelen feladat" },
+                fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                textDecoration = if (overdue) TextDecoration.LineThrough else TextDecoration.None
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (task.owner.isNotBlank()) {
+                    Text(task.owner, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (isDone && task.completedDate.isNotEmpty()) {
+                    Text(
+                        "Kész: ${task.completedDate.replace("-", ".")} ${task.completedTime}",
+                        fontSize = 13.sp, color = color
+                    )
+                } else {
+                    Text(
+                        "%d.%02d.%02d.".format(task.year, task.month, task.day),
+                        fontSize = 13.sp, color = color
+                    )
                 }
             }
         }
@@ -699,7 +932,11 @@ private val widgetOwnerEmailMap: Map<String, String> = mapOf(
     "Zoványi Erika" to "erika.zovanyi@kk.gov.hu"
 )
 
-private data class SimpleTask(val id: String, val title: String, val owner: String, val status: String)
+private data class SimpleTask(
+    val id: String, val title: String, val owner: String, val status: String,
+    val year: Int = 0, val month: Int = 0, val day: Int = 0,
+    val completedDate: String = "", val completedTime: String = ""
+)
 
 @Composable
 private fun WidgetTodayTasksCard() {
@@ -709,10 +946,6 @@ private fun WidgetTodayTasksCard() {
 
     DisposableEffect(userEmail) {
         if (userEmail.isBlank()) return@DisposableEffect onDispose {}
-        val today = Calendar.getInstance()
-        val day = today.get(Calendar.DAY_OF_MONTH)
-        val month = today.get(Calendar.MONTH) + 1
-        val year = today.get(Calendar.YEAR)
 
         fun parseTask(doc: com.google.firebase.firestore.DocumentSnapshot): SimpleTask? {
             val d = doc.data ?: return null
@@ -721,21 +954,20 @@ private fun WidgetTodayTasksCard() {
             val taskDay = (d["day"] as? Long)?.toInt() ?: return null
             val taskMonth = (d["month"] as? Long)?.toInt() ?: return null
             val taskYear = (d["year"] as? Long)?.toInt() ?: return null
-            if (taskDay != day || taskMonth != month || taskYear != year) return null
             return SimpleTask(id = doc.id, title = d["title"] as? String ?: "",
-                owner = d["owner"] as? String ?: "", status = status)
+                owner = d["owner"] as? String ?: "", status = status,
+                year = taskYear, month = taskMonth, day = taskDay)
         }
 
         val db = FirebaseFirestore.getInstance()
-        // Primary: by reminderTargetEmail
         val r1 = db.collection("deadlineTasks")
             .whereEqualTo("reminderTargetEmail", userEmail)
             .addSnapshotListener { snap, _ ->
                 val primary = (snap?.documents ?: emptyList()).mapNotNull { parseTask(it) }
                 tasks = (tasks.filter { t -> primary.none { it.id == t.id } } + primary)
                     .distinctBy { it.id }
+                    .sortedWith(compareBy({ it.year }, { it.month }, { it.day }))
             }
-        // Legacy: by owner display name (for tasks created before reminderTargetEmail)
         val ownerName = widgetOwnerEmailMap.entries.firstOrNull { it.value == userEmail }?.key
         val r2 = if (ownerName != null) {
             db.collection("deadlineTasks")
@@ -744,10 +976,11 @@ private fun WidgetTodayTasksCard() {
                     val legacy = (snap?.documents ?: emptyList()).mapNotNull { doc ->
                         val d = doc.data ?: return@mapNotNull null
                         if ((d["reminderTargetEmail"] as? String).isNullOrBlank()) parseTask(doc)
-                        else null // already caught by primary listener
+                        else null
                     }
                     tasks = (tasks.filter { t -> legacy.none { it.id == t.id } } + legacy)
                         .distinctBy { it.id }
+                        .sortedWith(compareBy({ it.year }, { it.month }, { it.day }))
                 }
         } else null
         onDispose { r1.remove(); r2?.remove() }
@@ -760,27 +993,37 @@ private fun WidgetTodayTasksCard() {
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("HATÁRIDŐS FELADAT · MA", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            Text("SAJÁT HATÁRIDŐS FELADATOK", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                 color = orange)
             if (tasks.isEmpty()) {
-                Text("Nincs mai határidős feladat", fontSize = 14.sp,
+                Text("Nincs aktív határidős feladat", fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp))
             } else {
                 tasks.forEach { task ->
+                    val overdue = isTaskOverdue(task)
+                    val color = taskUrgencyColor(task)
                     Row(
+                        modifier = Modifier.alpha(if (overdue) 0.5f else 1f),
                         verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            Modifier.padding(top = 5.dp).size(6.dp).clip(CircleShape).background(orange)
-                        )
+                        Box(Modifier.padding(top = 5.dp).size(6.dp).clip(CircleShape).background(color))
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text(task.title.ifEmpty { "Névtelen feladat" },
-                                fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            if (task.owner.isNotBlank()) {
-                                Text(task.owner, fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                task.title.ifEmpty { "Névtelen feladat" },
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                textDecoration = if (overdue) TextDecoration.LineThrough else TextDecoration.None
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (task.owner.isNotBlank()) {
+                                    Text(task.owner, fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text(
+                                    "%d.%02d.%02d.".format(task.year, task.month, task.day),
+                                    fontSize = 12.sp, color = color.copy(alpha = 0.8f)
+                                )
                             }
                         }
                     }
@@ -792,8 +1035,37 @@ private fun WidgetTodayTasksCard() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+private fun taskUrgencyColor(task: SimpleTask): Color {
+    if (task.status == "done") return Color(0xFF34C759)
+    val today = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }
+    val deadline = Calendar.getInstance().apply {
+        set(task.year, task.month - 1, task.day, 0, 0, 0); set(Calendar.MILLISECOND, 0)
+    }
+    val days = (deadline.timeInMillis - today.timeInMillis) / 86_400_000L
+    return when {
+        days < 0  -> Color(0xFFBF0000)
+        days == 0L -> Color(0xFFF22020)
+        days <= 3 -> Color(0xFFFF9500)
+        else -> Color(0xFF3399FF)
+    }
+}
+
+private fun isTaskOverdue(task: SimpleTask): Boolean {
+    if (task.status == "done" || task.status == "irrelevant") return false
+    val today = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }
+    val deadline = Calendar.getInstance().apply {
+        set(task.year, task.month - 1, task.day, 0, 0, 0); set(Calendar.MILLISECOND, 0)
+    }
+    return deadline.before(today)
+}
+
 fun statusColor(event: CalendarEvent, appColors: AppColors): Color {
     if (event.isVacation) return appColors.statusPurple
+    if (event.eventType == EventType.PRIVATE) return Color(0xFFFF9500)
     if (!event.hasTodoList) return if (event.visibleToUsers) appColors.statusBlue else appColors.statusGray
     val hasKK = event.activeActivities.contains("kk")
     val hasDTK = event.activeActivities.contains("dtk")
@@ -811,4 +1083,3 @@ private fun startOfDay(date: Date) = Calendar.getInstance().apply {
 private fun makeDate(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int) =
     Calendar.getInstance().apply { set(year, month, day, h, m, s); set(Calendar.MILLISECOND, 0) }.time
 
-private val CalendarEvent.isVacation get() = eventType == EventType.VACATION
