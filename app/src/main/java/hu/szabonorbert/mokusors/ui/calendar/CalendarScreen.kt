@@ -132,23 +132,35 @@ fun CalendarScreen(
         onDispose { reg.remove() }
     }
 
-    val now = remember { Date() }
+    var now by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            kotlinx.coroutines.delay(cal.time.time - System.currentTimeMillis())
+            now = Date()
+        }
+    }
     val selectedDayEvents = remember(events, selectedDate) { eventViewModel.eventsForDay(selectedDate) }
-    val redCount = remember(events) {
+    val redCount = remember(events, now) {
         events.count { ev ->
             !ev.isVacation && ev.hasTodoList && ev.date > now &&
             ev.activeActivities.contains("kk") && !ev.kkPermissionDone &&
             !(ev.activeActivities.contains("dtk") && ev.dtkParticipationDone)
         }
     }
-    val yellowCount = remember(events) {
+    val yellowCount = remember(events, now) {
         events.count { ev ->
             !ev.isVacation && ev.hasTodoList && ev.date > now &&
             ev.activeActivities.contains("kk") && !ev.kkPermissionDone &&
             ev.activeActivities.contains("dtk") && ev.dtkParticipationDone
         }
     }
-    val greenCount = remember(events) {
+    val greenCount = remember(events, now) {
         events.count { ev ->
             !ev.isVacation && ev.hasTodoList && ev.date > now &&
             ev.activeActivities.contains("kk") && ev.kkPermissionDone

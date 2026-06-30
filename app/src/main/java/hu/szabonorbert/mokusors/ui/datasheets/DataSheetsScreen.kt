@@ -62,7 +62,8 @@ data class DataSheet(
     val status: String,
     val fields: List<DataSheetField>,
     val multiRow: Boolean,
-    val createdBy: String = ""
+    val createdBy: String = "",
+    val targetUsers: List<String> = emptyList()
 ) {
     val deadlineFormatted: String get() {
         if (deadline.isBlank()) return ""
@@ -173,8 +174,11 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         status = (d["status"] as? String)?.lowercase() ?: "open",
                         fields = fields,
                         multiRow = d["multiRow"] as? Boolean ?: false,
-                        createdBy = d["createdBy"] as? String ?: d["creatorName"] as? String ?: ""
+                        createdBy = d["createdBy"] as? String ?: d["creatorName"] as? String ?: "",
+                        targetUsers = (d["targetUsers"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                     )
+                }.filter { sheet ->
+                    isAdmin || sheet.targetUsers.isEmpty() || sheet.targetUsers.contains(uid)
                 }.sortedWith(compareBy({ it.status != "open" }, { it.deadline.ifEmpty { "9999" } }))
                 if (selectedSheetId == null && sheets.isNotEmpty()) {
                     selectedSheetId = sheets.first().id

@@ -66,7 +66,7 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 
     // Load registration events + subcollection listeners
     DisposableEffect(Unit) {
-        val regListeners = mutableListOf<ListenerRegistration>()
+        val regListenerMap = mutableMapOf<String, ListenerRegistration>()
 
         val mainListener = db.collection("registrationEvents")
             .addSnapshotListener { snap, _ ->
@@ -100,25 +100,30 @@ fun RegistrationsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                 events = loaded
                 isLoading = false
 
-                // Attach subcollection listeners for each event
-                regListeners.forEach { it.remove() }
-                regListeners.clear()
+                // Diff-based subcollection listener management — avoid removing/re-adding unchanged events
+                val loadedIds = loaded.map { it.id }.toSet()
+                regListenerMap.keys.filter { it !in loadedIds }.forEach { id ->
+                    regListenerMap.remove(id)?.remove()
+                }
                 loaded.forEach { event ->
-                    val l = db.collection("registrationEvents").document(event.id)
-                        .collection("registrations")
-                        .addSnapshotListener { regSnap, _ ->
-                            val regs = (regSnap?.documents ?: emptyList()).mapNotNull { doc ->
-                                parseEntry(doc.data ?: return@mapNotNull null, doc.id)
+                    if (event.id !in regListenerMap) {
+                        val l = db.collection("registrationEvents").document(event.id)
+                            .collection("registrations")
+                            .addSnapshotListener { regSnap, _ ->
+                                val regs = (regSnap?.documents ?: emptyList()).mapNotNull { doc ->
+                                    parseEntry(doc.data ?: return@mapNotNull null, doc.id)
+                                }
+                                registrationsByEventId = registrationsByEventId.toMutableMap().also { it[event.id] = regs }
                             }
-                            registrationsByEventId = registrationsByEventId.toMutableMap().also { it[event.id] = regs }
-                        }
-                    regListeners.add(l)
+                        regListenerMap[event.id] = l
+                    }
                 }
             }
 
         onDispose {
             mainListener.remove()
-            regListeners.forEach { it.remove() }
+            regListenerMap.values.forEach { it.remove() }
+            regListenerMap.clear()
         }
     }
 

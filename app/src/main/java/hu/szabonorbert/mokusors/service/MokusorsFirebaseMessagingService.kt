@@ -17,6 +17,9 @@ import hu.szabonorbert.mokusors.R
 class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
+        // Cache token so it survives pre-login token rotation
+        getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)
+            .edit().putString("pending_token", token).apply()
         saveToken(token)
     }
 
@@ -83,20 +86,26 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         fun registerToken(context: Context) {
+            val user = FirebaseAuth.getInstance().currentUser ?: return
+            val db = FirebaseFirestore.getInstance()
+            val tokenData: (String) -> Map<String, Any> = { token ->
+                mapOf(
+                    "token" to token,
+                    "email" to (user.email ?: ""),
+                    "platform" to "android",
+                    "updatedAt" to (System.currentTimeMillis() / 1000.0)
+                )
+            }
+            // Apply any token that was cached pre-login, then fetch fresh from FCM
+            val prefs = context.getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)
+            val pendingToken = prefs.getString("pending_token", null)
+            if (pendingToken != null) {
+                db.collection("pushTokens").document(user.uid).set(tokenData(pendingToken))
+                    .addOnSuccessListener { prefs.edit().remove("pending_token").apply() }
+            }
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnSuccessListener { token ->
-                    val user = FirebaseAuth.getInstance().currentUser ?: return@addOnSuccessListener
-                    FirebaseFirestore.getInstance()
-                        .collection("pushTokens")
-                        .document(user.uid)
-                        .set(
-                            mapOf(
-                                "token" to token,
-                                "email" to (user.email ?: ""),
-                                "platform" to "android",
-                                "updatedAt" to (System.currentTimeMillis() / 1000.0)
-                            )
-                        )
+                    db.collection("pushTokens").document(user.uid).set(tokenData(token))
                 }
         }
     }
