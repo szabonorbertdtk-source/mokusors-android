@@ -6,17 +6,23 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
@@ -75,15 +81,34 @@ data class DataSheetRow(
     val updatedAt: String = ""
 )
 
+data class AdminUser(val id: String, val displayName: String, val email: String)
+
+data class AdminSheetSubmission(
+    val docId: String,
+    val userId: String,
+    val userName: String,
+    val institutionName: String,
+    val updatedAt: String,
+    val values: Map<String, String>
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DataSheetsScreen(onBack: () -> Unit) {
+fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     val blue = Color(0xFF007AFF)
     val db = FirebaseFirestore.getInstance()
     val auth = FirebaseAuth.getInstance()
     val uid = auth.currentUser?.uid ?: ""
     val userEmail = auth.currentUser?.email ?: ""
     val userName = auth.currentUser?.displayName ?: userEmail
+    var institutionName by remember { mutableStateOf("") }
+
+    LaunchedEffect(uid) {
+        if (uid.isNotBlank()) {
+            db.collection("users").document(uid).get()
+                .addOnSuccessListener { institutionName = it.getString("institutionName") ?: "" }
+        }
+    }
 
     var sheets by remember { mutableStateOf<List<DataSheet>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -98,6 +123,27 @@ fun DataSheetsScreen(onBack: () -> Unit) {
     var multiRowRows by remember { mutableStateOf<List<DataSheetRow>>(emptyList()) }
     var editingMultiRowId by remember { mutableStateOf<String?>(null) } // null=list, ""=new, docId=edit
     var editingValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    // Admin state
+    var adminUsers by remember { mutableStateOf<List<AdminUser>>(emptyList()) }
+    var adminSubmissions by remember { mutableStateOf<List<AdminSheetSubmission>>(emptyList()) }
+    var viewingSubmission by remember { mutableStateOf<AdminSheetSubmission?>(null) }
+
+    LaunchedEffect(isAdmin) {
+        if (!isAdmin) return@LaunchedEffect
+        db.collection("users").get().addOnSuccessListener { snap ->
+            adminUsers = snap.documents.mapNotNull { doc ->
+                val role = doc.getString("role") ?: "user"
+                if (role == "admin") return@mapNotNull null
+                val name = doc.getString("institutionName")?.takeIf { it.isNotBlank() }
+                    ?: doc.getString("fullName")?.takeIf { it.isNotBlank() }
+                    ?: doc.getString("displayName")?.takeIf { it.isNotBlank() }
+                    ?: ""
+                val email = doc.getString("email") ?: ""
+                AdminUser(id = doc.id, displayName = name.ifBlank { email }, email = email)
+            }.sortedBy { it.displayName }
+        }
+    }
 
     val selectedSheet = sheets.firstOrNull { it.id == selectedSheetId } ?: sheets.firstOrNull()
 
@@ -141,19 +187,40 @@ fun DataSheetsScreen(onBack: () -> Unit) {
     // Load rows for selected sheet
     val isMultiRow = selectedSheet?.multiRow == true
     var rowListener by remember { mutableStateOf<ListenerRegistration?>(null) }
-    LaunchedEffect(selectedSheetId, uid, isMultiRow) {
+    LaunchedEffect(selectedSheetId, uid, isMultiRow, isAdmin) {
         rowListener?.remove()
         rowListener = null
         ownValues = emptyMap()
         ownRowLoaded = false
         multiRowRows = emptyList()
+        adminSubmissions = emptyList()
         editingMultiRowId = null
         editingValues = emptyMap()
         savedMessage = ""
         errorMsg = ""
         val sheetId = selectedSheetId ?: return@LaunchedEffect
         if (uid.isBlank()) return@LaunchedEffect
-        if (isMultiRow) {
+        if (isAdmin) {
+            rowListener = db.collection("dataSheets").document(sheetId)
+                .collection("rows")
+                .addSnapshotListener { snap, _ ->
+                    adminSubmissions = snap?.documents?.mapNotNull { doc ->
+                        val d = doc.data ?: return@mapNotNull null
+                        @Suppress("UNCHECKED_CAST")
+                        val rawVals = d["values"] as? Map<String, Any> ?: emptyMap()
+                        val vals = rawVals.mapValues { it.value as? String ?: "" }
+                        AdminSheetSubmission(
+                            docId = doc.id,
+                            userId = d["userId"] as? String ?: doc.id,
+                            userName = d["userName"] as? String ?: "",
+                            institutionName = d["institutionName"] as? String ?: "",
+                            updatedAt = d["updatedAt"] as? String ?: d["createdAt"] as? String ?: "",
+                            values = vals
+                        )
+                    } ?: emptyList()
+                    ownRowLoaded = true
+                }
+        } else if (isMultiRow) {
             rowListener = db.collection("dataSheets").document(sheetId)
                 .collection("rows")
                 .whereEqualTo("userId", uid)
@@ -192,19 +259,24 @@ fun DataSheetsScreen(onBack: () -> Unit) {
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
-        val data = mapOf(
-            "userId" to uid,
-            "userEmail" to userEmail,
-            "userName" to userName,
-            "institutionName" to userName,
-            "values" to ownValues,
-            "updatedAt" to now
-        )
-        db.collection("dataSheets").document(sheetId)
-            .collection("rows").document(uid)
-            .set(data)
-            .addOnSuccessListener { isSaving = false; savedMessage = "Sikeresen mentve." }
-            .addOnFailureListener { e -> isSaving = false; errorMsg = e.message ?: "Mentési hiba." }
+        val rowRef = db.collection("dataSheets").document(sheetId).collection("rows").document(uid)
+        rowRef.get().addOnSuccessListener { existing ->
+            val data = mutableMapOf<String, Any>(
+                "userId" to uid,
+                "userEmail" to userEmail,
+                "userName" to userName,
+                "institutionName" to institutionName,
+                "values" to ownValues,
+                "updatedAt" to now
+            )
+            if (existing == null || !existing.exists()) {
+                data["createdAt"] = now
+                data["sheetId"] = sheetId
+            }
+            rowRef.set(data)
+                .addOnSuccessListener { isSaving = false; savedMessage = "Sikeresen mentve." }
+                .addOnFailureListener { e -> isSaving = false; errorMsg = e.message ?: "Mentési hiba." }
+        }.addOnFailureListener { e -> isSaving = false; errorMsg = e.message ?: "Mentési hiba." }
     }
 
     fun saveMultiRow() {
@@ -216,16 +288,21 @@ fun DataSheetsScreen(onBack: () -> Unit) {
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
-        val data = mapOf(
+        val rowsRef = db.collection("dataSheets").document(sheetId).collection("rows")
+        val isNew = editId.isEmpty()
+        val data = mutableMapOf<String, Any>(
             "userId" to uid,
             "userEmail" to userEmail,
             "userName" to userName,
-            "institutionName" to userName,
+            "institutionName" to institutionName,
             "values" to editingValues,
             "updatedAt" to now
         )
-        val rowsRef = db.collection("dataSheets").document(sheetId).collection("rows")
-        val task = if (editId.isEmpty()) rowsRef.add(data) else rowsRef.document(editId).set(data)
+        if (isNew) {
+            data["createdAt"] = now
+            data["sheetId"] = sheetId
+        }
+        val task = if (isNew) rowsRef.add(data) else rowsRef.document(editId).set(data)
         task
             .addOnSuccessListener {
                 isSaving = false
@@ -353,7 +430,18 @@ fun DataSheetsScreen(onBack: () -> Unit) {
 
             // Sheet form for selected sheet
             selectedSheet?.let { sheet ->
-                if (sheet.multiRow) {
+                if (isAdmin) {
+                    item {
+                        AdminSheetCard(
+                            sheet = sheet,
+                            submissions = adminSubmissions,
+                            users = adminUsers,
+                            loaded = ownRowLoaded,
+                            blue = blue,
+                            onViewSubmission = { viewingSubmission = it }
+                        )
+                    }
+                } else if (sheet.multiRow) {
                     item {
                         MultiRowSheetCard(
                             sheet = sheet,
@@ -410,6 +498,17 @@ fun DataSheetsScreen(onBack: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+
+    // Submission view dialog (admin)
+    viewingSubmission?.let { sub ->
+        selectedSheet?.let { sheet ->
+            SubmissionViewDialog(
+                submission = sub,
+                fields = sheet.fields,
+                onDismiss = { viewingSubmission = null }
+            )
         }
     }
 }
@@ -918,6 +1017,266 @@ private fun MultiRowSheetCard(
                         Text("Új sor hozzáadása", fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminSheetCard(
+    sheet: DataSheet,
+    submissions: List<AdminSheetSubmission>,
+    users: List<AdminUser>,
+    loaded: Boolean,
+    blue: Color,
+    onViewSubmission: (AdminSheetSubmission) -> Unit
+) {
+    val isOpen = sheet.status == "open"
+    val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
+    var isExpanded by remember { mutableStateOf(false) }
+
+    val submittedUserIds = submissions.map { it.userId }.toSet()
+    val submittedCount = users.count { u -> u.id in submittedUserIds }
+    val total = users.size
+
+    val isoFmt = remember {
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+    }
+    val displayFmt = remember {
+        java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale("hu"))
+    }
+    fun formatDate(iso: String): String {
+        if (iso.isBlank()) return ""
+        return try {
+            val clean = iso.substringBefore("Z").substringBefore(".")
+            val d = isoFmt.parse(clean) ?: return iso.take(10)
+            displayFmt.format(d)
+        } catch (_: Exception) { iso.take(10) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                            modifier = Modifier.weight(1f, fill = false))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(accentColor.copy(alpha = 0.12f))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                if (isOpen) "Nyitott" else "Lezárt",
+                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor
+                            )
+                        }
+                    }
+                    if (sheet.description.isNotBlank()) {
+                        Text(sheet.description, fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (sheet.deadlineFormatted.isNotBlank()) {
+                        Text("Határidő: ${sheet.deadlineFormatted}", fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium, color = accentColor)
+                    }
+                }
+            }
+
+            if (!loaded) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                return@Column
+            }
+
+            HorizontalDivider()
+
+            // Submission status header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "BEKÜLDÉSI ÁLLAPOT",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "$submittedCount / $total beküldve",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (total > 0 && submittedCount == total) Color(0xFF34C759) else Color(0xFFFF9500)
+                    )
+                    Icon(
+                        if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isExpanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                ) {
+                    Column {
+                        users.forEachIndexed { index, user ->
+                            val submission = submissions.firstOrNull { it.userId == user.id }
+                            val isLast = index == users.lastIndex
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (submission != null) Modifier.clickable { onViewSubmission(submission) }
+                                        else Modifier
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    user.displayName.ifBlank { user.email },
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (submission != null) {
+                                        Text(
+                                            formatDate(submission.updatedAt),
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF34C759),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Icon(
+                                            Icons.Default.ChevronRight,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else {
+                                        Text(
+                                            "Nem küldte be",
+                                            fontSize = 12.sp,
+                                            color = Color(0xFFFF3B30),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                            if (!isLast) HorizontalDivider(Modifier.padding(start = 12.dp))
+                        }
+                        if (users.isEmpty()) {
+                            Text(
+                                "Nincs felhasználó az adatbázisban.",
+                                modifier = Modifier.padding(12.dp),
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubmissionViewDialog(
+    submission: AdminSheetSubmission,
+    fields: List<DataSheetField>,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    submission.institutionName.ifBlank {
+                        submission.userName.ifBlank { submission.userId }
+                    },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                if (submission.updatedAt.isNotBlank()) {
+                    Text(
+                        "Beküldve: ${submission.updatedAt.take(10).replace("-", ".")}.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                HorizontalDivider()
+
+                if (fields.isEmpty()) {
+                    Text("Nincsenek mezők.", fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    fields.forEach { field ->
+                        val value = submission.values[field.id] ?: ""
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(field.label, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val displayValue = when {
+                                value == "true" || value == "1" -> "Igen"
+                                value == "false" || value == "0" -> "Nem"
+                                value.isBlank() -> "—"
+                                else -> value
+                            }
+                            Text(displayValue, fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        HorizontalDivider()
+                    }
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Bezárás") }
             }
         }
     }

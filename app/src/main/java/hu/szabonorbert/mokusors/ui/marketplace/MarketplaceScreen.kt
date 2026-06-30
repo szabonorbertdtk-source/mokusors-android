@@ -11,8 +11,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -65,9 +67,10 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     var requests by remember { mutableStateOf<List<TeacherRequest>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var searchText by remember { mutableStateOf("") }
     val purple = Color(0xFFAF52DE)
 
-    // Dialog states
+    // Dialog states (only for non-admin)
     var showNewTypeDialog by remember { mutableStateOf(false) }
     var editingOffer by remember { mutableStateOf<TeacherOffer?>(null) }
     var editingRequest by remember { mutableStateOf<TeacherRequest?>(null) }
@@ -91,7 +94,7 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         offeredHours = d["offeredHours"] as? String ?: "",
                         status = d["status"] as? String ?: "",
                         receivingInstitution = d["receivingInstitution"] as? String ?: "",
-                        creatorId = d["creatorId"] as? String ?: ""
+                        creatorId = d["createdByUid"] as? String ?: d["creatorId"] as? String ?: ""
                     )
                 }.sortedWith(compareBy({ it.institution }, { it.teacherName }))
                 offersLoaded = true
@@ -110,7 +113,7 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         requiredQualification = d["requiredQualification"] as? String ?: "",
                         hours = d["hours"] as? String ?: "",
                         status = d["status"] as? String ?: "",
-                        creatorId = d["creatorId"] as? String ?: ""
+                        creatorId = d["createdByUid"] as? String ?: d["creatorId"] as? String ?: ""
                     )
                 }.sortedBy { it.institution }
                 requestsLoaded = true
@@ -125,17 +128,18 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 
     fun saveOffer(id: String?, institution: String, teacherName: String,
                   qualification: String, offeredHours: String, receivingInstitution: String) {
+        val now = nowUtc()
         val data = mutableMapOf<String, Any>(
             "institution" to institution, "teacherName" to teacherName,
             "qualification" to qualification, "offeredHours" to offeredHours,
             "receivingInstitution" to receivingInstitution, "status" to "active",
-            "updatedAt" to nowUtc()
+            "updatedAt" to now, "updatedBy" to userEmail
         )
         if (id == null) {
-            data["creatorId"] = uid
-            data["creatorEmail"] = userEmail
-            data["creatorName"] = userName
-            data["createdAt"] = nowUtc()
+            data["createdByUid"] = uid
+            data["createdBy"] = userEmail
+            data["createdByName"] = userName
+            data["createdAt"] = now
             db.collection("teacherOffers").add(data)
         } else {
             db.collection("teacherOffers").document(id).update(data)
@@ -144,16 +148,17 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
 
     fun saveRequest(id: String?, institution: String, tasks: String,
                     requiredQualification: String, hours: String) {
+        val now = nowUtc()
         val data = mutableMapOf<String, Any>(
             "institution" to institution, "tasks" to tasks,
             "requiredQualification" to requiredQualification, "hours" to hours,
-            "status" to "active", "updatedAt" to nowUtc()
+            "status" to "active", "updatedAt" to now, "updatedBy" to userEmail
         )
         if (id == null) {
-            data["creatorId"] = uid
-            data["creatorEmail"] = userEmail
-            data["creatorName"] = userName
-            data["createdAt"] = nowUtc()
+            data["createdByUid"] = uid
+            data["createdBy"] = userEmail
+            data["createdByName"] = userName
+            data["createdAt"] = now
             db.collection("teacherRequests").add(data)
         } else {
             db.collection("teacherRequests").document(id).update(data)
@@ -161,11 +166,32 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
     }
 
     fun deleteOffer(id: String) {
-        db.collection("teacherOffers").document(id).update("deleted", true)
+        db.collection("teacherOffers").document(id).update(mapOf(
+            "deleted" to true, "deletedAt" to nowUtc(), "deletedBy" to userEmail
+        ))
     }
 
     fun deleteRequest(id: String) {
-        db.collection("teacherRequests").document(id).update("deleted", true)
+        db.collection("teacherRequests").document(id).update(mapOf(
+            "deleted" to true, "deletedAt" to nowUtc(), "deletedBy" to userEmail
+        ))
+    }
+
+    val filteredOffers = remember(offers, searchText, isAdmin) {
+        if (!isAdmin || searchText.isBlank()) offers
+        else {
+            val q = searchText.trim().lowercase()
+            offers.filter {
+                it.teacherName.lowercase().contains(q) || it.institution.lowercase().contains(q)
+            }
+        }
+    }
+    val filteredRequests = remember(requests, searchText, isAdmin) {
+        if (!isAdmin || searchText.isBlank()) requests
+        else {
+            val q = searchText.trim().lowercase()
+            requests.filter { it.institution.lowercase().contains(q) }
+        }
     }
 
     Scaffold(
@@ -176,21 +202,43 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showNewTypeDialog = true },
-                containerColor = purple
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Új hirdetés", tint = Color.White)
+            if (!isAdmin) {
+                FloatingActionButton(
+                    onClick = { showNewTypeDialog = true },
+                    containerColor = purple
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Új hirdetés", tint = Color.White)
+                }
             }
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            if (isAdmin) {
+                OutlinedTextField(
+                    value = searchText,
+                    onValueChange = { searchText = it },
+                    placeholder = { Text("Keresés névre, intézményre…") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = {
+                        if (searchText.isNotEmpty()) {
+                            IconButton(onClick = { searchText = "" }) {
+                                Icon(Icons.Default.Close, null)
+                            }
+                        }
+                    }
+                )
+            }
             TabRow(selectedTabIndex = selectedTab) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                    Text("Kínálat (${offers.size})", modifier = Modifier.padding(vertical = 12.dp))
+                    Text("Kínálat (${filteredOffers.size})", modifier = Modifier.padding(vertical = 12.dp))
                 }
                 Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                    Text("Kereslet (${requests.size})", modifier = Modifier.padding(vertical = 12.dp))
+                    Text("Kereslet (${filteredRequests.size})", modifier = Modifier.padding(vertical = 12.dp))
                 }
             }
             if (isLoading) {
@@ -198,7 +246,7 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                 return@Scaffold
             }
             if (selectedTab == 0) {
-                if (offers.isEmpty()) {
+                if (filteredOffers.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Nincs kínálat.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -207,8 +255,8 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(offers) { offer ->
-                            val canEdit = isAdmin || offer.creatorId == uid
+                        items(filteredOffers) { offer ->
+                            val canEdit = !isAdmin && offer.creatorId == uid
                             OfferCard(
                                 offer = offer, purple = purple, canEdit = canEdit,
                                 onEdit = { editingOffer = offer },
@@ -218,7 +266,7 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     }
                 }
             } else {
-                if (requests.isEmpty()) {
+                if (filteredRequests.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Nincs kereslet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -227,8 +275,8 @@ fun MarketplaceScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(requests) { request ->
-                            val canEdit = isAdmin || request.creatorId == uid
+                        items(filteredRequests) { request ->
+                            val canEdit = !isAdmin && request.creatorId == uid
                             RequestCard(
                                 request = request, purple = purple, canEdit = canEdit,
                                 onEdit = { editingRequest = request },

@@ -101,14 +101,13 @@ fun MokusorsApp(
     val eventViewModel: EventViewModel = viewModel()
     val authState by authViewModel.authState.collectAsState()
     val isAdmin by eventViewModel.isAdmin.collectAsState()
+    val adminResolved by eventViewModel.adminResolved.collectAsState()
     val navController = rememberNavController()
     var selectedEvent by remember { mutableStateOf<CalendarEvent?>(null) }
     var eventToEdit by remember { mutableStateOf<CalendarEvent?>(null) }
 
-    LaunchedEffect(isAdmin) {
-        if (isAdmin || authState is AuthState.LoggedIn) {
-            onRoleResolved(isAdmin)
-        }
+    LaunchedEffect(adminResolved, isAdmin) {
+        if (adminResolved) onRoleResolved(isAdmin)
     }
 
     when (authState) {
@@ -175,7 +174,7 @@ fun MokusorsApp(
                 composable("registrations") {
                     RegistrationsScreen(isAdmin = isAdmin) { navController.popBackStack() }
                 }
-                composable("datasheets") { DataSheetsScreen { navController.popBackStack() } }
+                composable("datasheets") { DataSheetsScreen(isAdmin = isAdmin) { navController.popBackStack() } }
                 composable("marketplace") { MarketplaceScreen(isAdmin = isAdmin) { navController.popBackStack() } }
                 composable("resumes") {
                     ResumesScreen(isAdmin = isAdmin) { navController.popBackStack() }
