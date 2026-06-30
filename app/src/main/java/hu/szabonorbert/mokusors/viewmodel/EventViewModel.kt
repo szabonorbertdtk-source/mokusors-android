@@ -74,27 +74,23 @@ class EventViewModel : ViewModel() {
         val uid = auth.currentUser?.uid ?: return
         val isRegularUser = !isAdmin
 
-        if (isRegularUser) {
-            menuListener = db.collection("systemSettings").document("userMenu")
-                .addSnapshotListener { snap, _ ->
-                    val s = (snap?.data?.get("settings") as? Map<*, *>) ?: emptyMap<String, Any>()
+        // Both regular users and admins read from their own settings/menu (same as iOS/web)
+        menuListener = db.collection("users").document(uid)
+            .collection("settings").document("menu")
+            .addSnapshotListener { snap, _ ->
+                val d = snap?.data ?: emptyMap<String, Any>()
+                if (isRegularUser) {
                     _menuSettings.value = MenuSettings(
-                        tasks = s["tasks"] as? Boolean ?: false,
-                        registrations = s["registrations"] as? Boolean ?: true,
-                        dataSheets = s["dataSheets"] as? Boolean ?: true,
-                        marketplace = s["marketplace"] as? Boolean ?: true,
-                        resumes = s["resumes"] as? Boolean ?: true,
-                        photos = s["photos"] as? Boolean ?: true,
-                        documents = s["documents"] as? Boolean ?: false,
-                        inventory = s["inventory"] as? Boolean ?: true
+                        tasks = d["tasks"] as? Boolean ?: true,
+                        registrations = d["registrations"] as? Boolean ?: true,
+                        dataSheets = d["dataSheets"] as? Boolean ?: true,
+                        marketplace = d["marketplace"] as? Boolean ?: true,
+                        resumes = d["resumes"] as? Boolean ?: true,
+                        photos = d["photos"] as? Boolean ?: true,
+                        documents = d["documents"] as? Boolean ?: true,
+                        inventory = d["inventory"] as? Boolean ?: true
                     )
-                }
-        } else {
-            // Admin: read menu visibility from settings/menu (same keys as iOS)
-            menuListener = db.collection("users").document(uid)
-                .collection("settings").document("menu")
-                .addSnapshotListener { snap, _ ->
-                    val d = snap?.data ?: emptyMap<String, Any>()
+                } else {
                     _menuSettings.value = MenuSettings(
                         tasks = d["tasks"] as? Boolean ?: true,
                         registrations = d["registrations"] as? Boolean ?: true,
@@ -106,7 +102,7 @@ class EventViewModel : ViewModel() {
                         inventory = d["inventory"] as? Boolean ?: true
                     )
                 }
-        }
+            }
     }
 
     fun selectDate(date: Date) {
