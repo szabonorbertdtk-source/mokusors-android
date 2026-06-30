@@ -166,7 +166,7 @@ fun CalendarScreen(
             ev.activeActivities.contains("kk") && ev.kkPermissionDone
         }
     }
-    val thisWeekEvents = remember(events) {
+    val thisWeekEvents = remember(events, now) {
         val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY }
         cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
         cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
