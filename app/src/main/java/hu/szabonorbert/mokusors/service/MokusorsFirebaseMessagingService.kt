@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -22,7 +23,8 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         val title = remoteMessage.notification?.title ?: remoteMessage.data["title"] ?: return
         val body = remoteMessage.notification?.body ?: remoteMessage.data["body"] ?: ""
-        showNotification(title, body)
+        val url = remoteMessage.data["url"]?.takeIf { it.isNotBlank() }
+        showNotification(title, body, url)
     }
 
     private fun saveToken(token: String) {
@@ -34,12 +36,13 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
                 mapOf(
                     "token" to token,
                     "email" to (user.email ?: ""),
+                    "platform" to "android",
                     "updatedAt" to (System.currentTimeMillis() / 1000.0)
                 )
             )
     }
 
-    fun showNotification(title: String, body: String) {
+    fun showNotification(title: String, body: String, url: String? = null) {
         val channelId = "mokusors_general"
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -48,11 +51,19 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
         )
         manager.createNotificationChannel(channel)
 
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val intent = if (!url.isNullOrBlank()) {
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        } else {
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
         }
+
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            this, url.hashCode(), intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         val notification = NotificationCompat.Builder(this, channelId)
@@ -79,6 +90,7 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
                             mapOf(
                                 "token" to token,
                                 "email" to (user.email ?: ""),
+                                "platform" to "android",
                                 "updatedAt" to (System.currentTimeMillis() / 1000.0)
                             )
                         )

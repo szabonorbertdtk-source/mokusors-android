@@ -44,6 +44,7 @@ fun LoginScreen(authViewModel: AuthViewModel) {
                 modifier = Modifier.size(190.dp)
             )
 
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

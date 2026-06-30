@@ -28,16 +28,6 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.*
 
-private val editActivityKeys = listOf("dtk", "kk", "press", "ph", "catering", "gifts", "certificate")
-private val editActivityLabels = mapOf(
-    "dtk" to "DTK részvétel",
-    "kk" to "KK engedély",
-    "press" to "Sajtómeghívó",
-    "ph" to "PH háttéranyag",
-    "catering" to "Catering",
-    "gifts" to "Ajándékok (virág, könyv)",
-    "certificate" to "Oklevél / emléklap"
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,13 +38,6 @@ fun EditEventScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    val eventTypeOptions = listOf(
-        EventType.NONE to "Nincs",
-        EventType.GUEST to "Vendég",
-        EventType.SPEECH to "Köszöntőbeszéd",
-        EventType.VACATION to "Szabadság"
-    )
 
     var eventType by remember { mutableStateOf(event.eventType) }
     var title by remember { mutableStateOf(event.title) }
@@ -68,7 +51,7 @@ fun EditEventScreen(
     var selectedActivities by remember {
         mutableStateOf(
             if (event.activities.isNotEmpty()) event.activities.toSet()
-            else editActivityKeys.toSet()
+            else activityKeys.toSet()
         )
     }
     var visibleToUsers by remember { mutableStateOf(event.visibleToUsers) }
@@ -290,7 +273,7 @@ fun EditEventScreen(
                     onCheckedChange = {
                         hasTodoList = it
                         if (it && selectedActivities.isEmpty()) {
-                            selectedActivities = editActivityKeys.toSet()
+                            selectedActivities = activityKeys.toSet()
                         }
                     }
                 )
@@ -301,7 +284,7 @@ fun EditEventScreen(
                     modifier = Modifier.padding(start = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    editActivityKeys.forEach { key ->
+                    activityKeys.forEach { key ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
@@ -316,7 +299,7 @@ fun EditEventScreen(
                                     }
                                 }
                             )
-                            Text(editActivityLabels[key] ?: key, fontSize = 15.sp)
+                            Text(activityLabels[key] ?: key, fontSize = 15.sp)
                         }
                     }
                 }

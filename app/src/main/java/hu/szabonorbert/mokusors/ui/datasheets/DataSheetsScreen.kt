@@ -158,7 +158,7 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     val rawFields = d["fields"] as? List<Map<String, Any>> ?: emptyList()
                     val fields = rawFields.mapIndexed { i, f ->
                         DataSheetField(
-                            id = f["id"] as? String ?: UUID.randomUUID().toString(),
+                            id = f["id"] as? String ?: f["label"] as? String ?: "$i",
                             label = f["label"] as? String ?: "",
                             type = f["type"] as? String ?: "text",
                             required = f["required"] as? Boolean ?: false,
@@ -204,19 +204,45 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             rowListener = db.collection("dataSheets").document(sheetId)
                 .collection("rows")
                 .addSnapshotListener { snap, _ ->
-                    adminSubmissions = snap?.documents?.mapNotNull { doc ->
-                        val d = doc.data ?: return@mapNotNull null
+                    adminSubmissions = snap?.documents?.flatMap { doc ->
+                        val d = doc.data ?: return@flatMap emptyList<AdminSheetSubmission>()
+                        val docUserId = d["userId"] as? String ?: doc.id
+                        val docUserName = d["userName"] as? String ?: ""
+                        val docInstitution = d["institutionName"] as? String ?: ""
+                        val docUpdatedAt = d["updatedAt"] as? String ?: d["createdAt"] as? String ?: ""
                         @Suppress("UNCHECKED_CAST")
-                        val rawVals = d["values"] as? Map<String, Any> ?: emptyMap()
-                        val vals = rawVals.mapValues { it.value as? String ?: "" }
-                        AdminSheetSubmission(
-                            docId = doc.id,
-                            userId = d["userId"] as? String ?: doc.id,
-                            userName = d["userName"] as? String ?: "",
-                            institutionName = d["institutionName"] as? String ?: "",
-                            updatedAt = d["updatedAt"] as? String ?: d["createdAt"] as? String ?: "",
-                            values = vals
-                        )
+                        val multiRows = d["multiRows"] as? Map<String, Any>
+                        if (multiRows != null) {
+                            // iOS/web multiRow: single doc per user with nested multiRows map
+                            multiRows.entries.map { (rowId, rowData) ->
+                                @Suppress("UNCHECKED_CAST")
+                                val rd = rowData as? Map<String, Any> ?: emptyMap()
+                                @Suppress("UNCHECKED_CAST")
+                                val rawVals = rd["values"] as? Map<String, Any> ?: emptyMap()
+                                val vals = rawVals.mapValues { it.value?.toString() ?: "" }
+                                AdminSheetSubmission(
+                                    docId = "${doc.id}_$rowId",
+                                    userId = docUserId,
+                                    userName = docUserName,
+                                    institutionName = docInstitution,
+                                    updatedAt = rd["updatedAt"] as? String ?: docUpdatedAt,
+                                    values = vals
+                                )
+                            }
+                        } else {
+                            // Android/iOS single-row: values at top level
+                            @Suppress("UNCHECKED_CAST")
+                            val rawVals = d["values"] as? Map<String, Any> ?: emptyMap()
+                            val vals = rawVals.mapValues { it.value?.toString() ?: "" }
+                            listOf(AdminSheetSubmission(
+                                docId = doc.id,
+                                userId = docUserId,
+                                userName = docUserName,
+                                institutionName = docInstitution,
+                                updatedAt = docUpdatedAt,
+                                values = vals
+                            ))
+                        }
                     } ?: emptyList()
                     ownRowLoaded = true
                 }
@@ -225,16 +251,37 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                 .collection("rows")
                 .whereEqualTo("userId", uid)
                 .addSnapshotListener { snap, _ ->
-                    @Suppress("UNCHECKED_CAST")
-                    multiRowRows = snap?.documents?.mapNotNull { doc ->
-                        val d = doc.data ?: return@mapNotNull null
-                        DataSheetRow(
-                            id = doc.id,
-                            userId = d["userId"] as? String ?: uid,
-                            userName = d["userName"] as? String ?: userName,
-                            values = (d["values"] as? Map<String, String>) ?: emptyMap(),
-                            updatedAt = d["updatedAt"] as? String ?: ""
-                        )
+                    multiRowRows = snap?.documents?.flatMap { doc ->
+                        val d = doc.data ?: return@flatMap emptyList<DataSheetRow>()
+                        @Suppress("UNCHECKED_CAST")
+                        val multiRows = d["multiRows"] as? Map<String, Any>
+                        if (multiRows != null) {
+                            // iOS structure: single doc per user with nested multiRows map
+                            multiRows.entries.map { (rowId, rowData) ->
+                                @Suppress("UNCHECKED_CAST")
+                                val rd = rowData as? Map<String, Any> ?: emptyMap()
+                                @Suppress("UNCHECKED_CAST")
+                                val rawVals = rd["values"] as? Map<String, Any> ?: emptyMap()
+                                DataSheetRow(
+                                    id = rowId,
+                                    userId = d["userId"] as? String ?: uid,
+                                    userName = d["userName"] as? String ?: userName,
+                                    values = rawVals.mapValues { it.value?.toString() ?: "" },
+                                    updatedAt = rd["updatedAt"] as? String ?: d["updatedAt"] as? String ?: ""
+                                )
+                            }
+                        } else {
+                            // Android structure: separate docs with values at top level
+                            @Suppress("UNCHECKED_CAST")
+                            val rawVals = d["values"] as? Map<String, Any> ?: emptyMap()
+                            listOf(DataSheetRow(
+                                id = doc.id,
+                                userId = d["userId"] as? String ?: uid,
+                                userName = d["userName"] as? String ?: userName,
+                                values = rawVals.mapValues { it.value?.toString() ?: "" },
+                                updatedAt = d["updatedAt"] as? String ?: ""
+                            ))
+                        }
                     } ?: emptyList()
                     ownRowLoaded = true
                 }
@@ -243,8 +290,8 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                 .collection("rows").document(uid)
                 .addSnapshotListener { snap, _ ->
                     @Suppress("UNCHECKED_CAST")
-                    val vals = snap?.data?.get("values") as? Map<String, String> ?: emptyMap()
-                    ownValues = vals
+                    val rawVals = snap?.data?.get("values") as? Map<String, Any> ?: emptyMap()
+                    ownValues = rawVals.mapValues { it.value?.toString() ?: "" }
                     ownRowLoaded = true
                 }
         }
@@ -1033,26 +1080,22 @@ private fun AdminSheetCard(
 ) {
     val isOpen = sheet.status == "open"
     val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpanded by remember(sheet.id) { mutableStateOf(true) }
 
     val submittedUserIds = submissions.map { it.userId }.toSet()
-    val submittedCount = users.count { u -> u.id in submittedUserIds }
-    val total = users.size
+    val usersLoaded = users.isNotEmpty()
+    val submittedCount = if (usersLoaded) users.count { u -> u.id in submittedUserIds } else submissions.size
+    val total = if (usersLoaded) users.size else null
 
     val isoFmt = remember {
         java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
             .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
     }
-    val displayFmt = remember {
-        java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale("hu"))
-    }
+    val displayFmt = remember { java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale("hu")) }
     fun formatDate(iso: String): String {
         if (iso.isBlank()) return ""
-        return try {
-            val clean = iso.substringBefore("Z").substringBefore(".")
-            val d = isoFmt.parse(clean) ?: return iso.take(10)
-            displayFmt.format(d)
-        } catch (_: Exception) { iso.take(10) }
+        return try { displayFmt.format(isoFmt.parse(iso.substringBefore("Z").substringBefore("."))!!) }
+        catch (_: Exception) { iso.take(10) }
     }
 
     Box(
@@ -1063,6 +1106,7 @@ private fun AdminSheetCard(
             .padding(16.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Sheet header
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1118,20 +1162,21 @@ private fun AdminSheetCard(
             ) {
                 Text(
                     "BEKÜLDÉSI ÁLLAPOT",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "$submittedCount / $total beküldve",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (total > 0 && submittedCount == total) Color(0xFF34C759) else Color(0xFFFF9500)
-                    )
+                    val countText = if (total != null) "$submittedCount / $total beküldve"
+                                    else "$submittedCount beküldve"
+                    val countColor = when {
+                        total != null && submittedCount == total && total > 0 -> Color(0xFF34C759)
+                        submissions.isEmpty() -> Color(0xFF8E8E93)
+                        else -> Color(0xFFFF9500)
+                    }
+                    Text(countText, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = countColor)
                     Icon(
                         if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
@@ -1149,58 +1194,98 @@ private fun AdminSheetCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                 ) {
                     Column {
-                        users.forEachIndexed { index, user ->
-                            val submission = submissions.firstOrNull { it.userId == user.id }
-                            val isLast = index == users.lastIndex
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .then(
-                                        if (submission != null) Modifier.clickable { onViewSubmission(submission) }
-                                        else Modifier
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    user.displayName.ifBlank { user.email },
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.weight(1f),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                        if (usersLoaded) {
+                            // Show all users with submitted/not status
+                            users.forEachIndexed { index, user ->
+                                val submission = submissions.firstOrNull { it.userId == user.id }
+                                val isLast = index == users.lastIndex
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (submission != null) Modifier.clickable { onViewSubmission(submission) }
+                                            else Modifier
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (submission != null) {
+                                    Text(
+                                        user.displayName.ifBlank { user.email },
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        if (submission != null) {
+                                            Text(
+                                                formatDate(submission.updatedAt),
+                                                fontSize = 12.sp, color = Color(0xFF34C759),
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Icon(
+                                                Icons.Default.ChevronRight, null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        } else {
+                                            Text(
+                                                "Nem küldte be",
+                                                fontSize = 12.sp, color = Color(0xFFFF3B30),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                                if (!isLast) HorizontalDivider(Modifier.padding(start = 12.dp))
+                            }
+                        } else if (submissions.isNotEmpty()) {
+                            // No users loaded — show submissions directly
+                            submissions.forEachIndexed { index, sub ->
+                                val isLast = index == submissions.lastIndex
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onViewSubmission(sub) }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
                                         Text(
-                                            formatDate(submission.updatedAt),
-                                            fontSize = 12.sp,
-                                            color = Color(0xFF34C759),
+                                            sub.institutionName.ifBlank { sub.userName.ifBlank { sub.userId } },
+                                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (sub.userName.isNotBlank() && sub.institutionName.isNotBlank()) {
+                                            Text(sub.userName, fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            formatDate(sub.updatedAt),
+                                            fontSize = 12.sp, color = Color(0xFF34C759),
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Icon(
-                                            Icons.Default.ChevronRight,
-                                            contentDescription = null,
+                                            Icons.Default.ChevronRight, null,
                                             modifier = Modifier.size(16.dp),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    } else {
-                                        Text(
-                                            "Nem küldte be",
-                                            fontSize = 12.sp,
-                                            color = Color(0xFFFF3B30),
-                                            fontWeight = FontWeight.Medium
-                                        )
                                     }
                                 }
+                                if (!isLast) HorizontalDivider(Modifier.padding(start = 12.dp))
                             }
-                            if (!isLast) HorizontalDivider(Modifier.padding(start = 12.dp))
-                        }
-                        if (users.isEmpty()) {
+                        } else {
                             Text(
-                                "Nincs felhasználó az adatbázisban.",
+                                "Még nincs beküldött adat.",
                                 modifier = Modifier.padding(12.dp),
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1249,12 +1334,18 @@ private fun SubmissionViewDialog(
 
                 HorizontalDivider()
 
-                if (fields.isEmpty()) {
+                if (fields.isEmpty() && submission.values.isEmpty()) {
                     Text("Nincsenek mezők.", fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
+                } else if (fields.isNotEmpty()) {
+                    val matchedKeys = mutableSetOf<String>()
                     fields.forEach { field ->
-                        val value = submission.values[field.id] ?: ""
+                        // Try field.id first, then field.label (web/iOS may use label as key)
+                        val value = submission.values[field.id]?.takeIf { it.isNotBlank() }
+                            ?: submission.values[field.label]?.takeIf { it.isNotBlank() }
+                            ?: ""
+                        if (submission.values.containsKey(field.id)) matchedKeys.add(field.id)
+                        if (submission.values.containsKey(field.label)) matchedKeys.add(field.label)
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(field.label, fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -1267,6 +1358,36 @@ private fun SubmissionViewDialog(
                             }
                             Text(displayValue, fontSize = 15.sp,
                                 color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        HorizontalDivider()
+                    }
+                    // Also show any values not matched by field IDs/labels (extra data)
+                    val unmatchedValues = submission.values.filterKeys { it !in matchedKeys }
+                    unmatchedValues.forEach { (key, value) ->
+                        if (value.isBlank()) return@forEach
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(key, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val displayValue = when (value) {
+                                "true", "1" -> "Igen"
+                                "false", "0" -> "Nem"
+                                else -> value
+                            }
+                            Text(displayValue, fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        HorizontalDivider()
+                    }
+                } else {
+                    // No fields defined — show raw values
+                    submission.values.forEach { (key, value) ->
+                        if (value.isBlank()) return@forEach
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(key, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(value, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
                         HorizontalDivider()
                     }

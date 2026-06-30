@@ -29,6 +29,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -38,16 +39,6 @@ private val timeDisplayFmt = SimpleDateFormat("HH:mm", Locale("hu"))
 
 private val vacationPeople = listOf("Laci", "Ivett", "Tündi", "Balázs")
 
-private val activityKeys = listOf("dtk", "kk", "press", "ph", "catering", "gifts", "certificate")
-private val activityLabels = mapOf(
-    "dtk" to "DTK részvétel",
-    "kk" to "KK engedély",
-    "press" to "Sajtómeghívó",
-    "ph" to "PH háttéranyag",
-    "catering" to "Catering",
-    "gifts" to "Ajándékok (virág, könyv)",
-    "certificate" to "Oklevél / emléklap"
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,13 +86,6 @@ fun AddEventScreen(
     }
 
     val scope = rememberCoroutineScope()
-
-    val eventTypeOptions = listOf(
-        EventType.NONE to "Nincs",
-        EventType.GUEST to "Vendég",
-        EventType.SPEECH to "Köszöntőbeszéd",
-        EventType.VACATION to "Szabadság"
-    )
 
     val canSave = when (eventType) {
         EventType.VACATION -> selectedPeople.isNotEmpty()
@@ -155,7 +139,7 @@ fun AddEventScreen(
                                         allDay = allDay,
                                         pdfUrl = resolvedPdfUrl,
                                         onSuccess = {
-                                            sendAdminEventNotification(title, startDate)
+                                            sendAdminEventNotification(scope, title, startDate)
                                             onBack()
                                         },
                                         onError = { msg -> isSaving = false; errorMsg = msg }
@@ -507,11 +491,11 @@ private fun TimePickerField(
     }
 }
 
-private fun sendAdminEventNotification(title: String, date: Date) {
+private fun sendAdminEventNotification(scope: CoroutineScope, title: String, date: Date) {
     val eventDateStr = SimpleDateFormat("yyyy. MM. dd.", Locale("hu")).format(date)
     FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.addOnSuccessListener { result ->
         val token = result.token ?: return@addOnSuccessListener
-        CoroutineScope(Dispatchers.IO).launch {
+        scope.launch(Dispatchers.IO) {
             try {
                 val conn = URL("https://mokusors-admin.vercel.app/api/admin/notifications/admin-event")
                     .openConnection() as HttpURLConnection
