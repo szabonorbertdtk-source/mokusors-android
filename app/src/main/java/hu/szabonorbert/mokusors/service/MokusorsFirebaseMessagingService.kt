@@ -21,6 +21,9 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        // AppNotificationManager handles notifications via Firestore listener when the app is in
+        // the foreground — skip FCM here to avoid showing the same notification twice.
+        if (AppNotificationManager.isActive()) return
         val title = remoteMessage.notification?.title ?: remoteMessage.data["title"] ?: return
         val body = remoteMessage.notification?.body ?: remoteMessage.data["body"] ?: ""
         val url = remoteMessage.data["url"]?.takeIf { it.isNotBlank() }

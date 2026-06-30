@@ -70,6 +70,8 @@ object AppNotificationManager {
         }
     }
 
+    fun isActive(): Boolean = userListener != null
+
     fun stop() {
         adminListener?.remove()
         userListener?.remove()
