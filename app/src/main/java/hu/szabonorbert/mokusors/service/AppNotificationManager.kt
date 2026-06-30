@@ -117,7 +117,8 @@ object AppNotificationManager {
                     val settingKey = notificationSettingKey(type, contentType)
                     if (settingKey != null && notifSettings[settingKey] == false) return@forEach
 
-                    showNotification(context, title, body)
+                    val dest = notificationDestination(type, contentType)
+                    showNotification(context, title, body, dest)
                 }
             }
 
@@ -132,14 +133,31 @@ object AppNotificationManager {
         return contentTypeToSettingKey[contentType]
     }
 
-    private fun showNotification(context: Context, title: String, body: String) {
+    private fun notificationDestination(type: String, contentType: String): String? = when {
+        type == "program-created" || contentType == "program" -> "registrations"
+        type == "dataSheet-created" || contentType == "dataSheet" -> "datasheets"
+        type == "resume-created" || contentType == "resume" -> "resumes"
+        type.startsWith("offer") || contentType == "offer" -> "marketplace"
+        type.contains("document") || contentType == "document" -> "documents"
+        type.contains("inventory") || contentType == "inventory" -> "inventory"
+        type.startsWith("deadline-task") -> "tasks"
+        else -> null
+    }
+
+    private fun showNotification(context: Context, title: String, body: String, destination: String? = null) {
         val channelId = "mokusors_general"
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(channelId, "Mókusörs értesítések", NotificationManager.IMPORTANCE_DEFAULT)
         manager.createNotificationChannel(channel)
 
-        val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
-        val pending = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            destination?.let { putExtra("destination", it) }
+        }
+        val pending = PendingIntent.getActivity(
+            context, destination?.hashCode() ?: 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)

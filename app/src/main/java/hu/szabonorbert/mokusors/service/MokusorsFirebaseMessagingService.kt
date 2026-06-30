@@ -30,7 +30,9 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
         val title = remoteMessage.notification?.title ?: remoteMessage.data["title"] ?: return
         val body = remoteMessage.notification?.body ?: remoteMessage.data["body"] ?: ""
         val url = remoteMessage.data["url"]?.takeIf { it.isNotBlank() }
-        showNotification(title, body, url)
+        val type = remoteMessage.data["type"] ?: ""
+        val contentType = remoteMessage.data["contentType"] ?: ""
+        showNotification(title, body, url, type, contentType)
     }
 
     private fun saveToken(token: String) {
@@ -48,7 +50,7 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
             )
     }
 
-    fun showNotification(title: String, body: String, url: String? = null) {
+    fun showNotification(title: String, body: String, url: String? = null, type: String = "", contentType: String = "") {
         val channelId = "mokusors_general"
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -62,13 +64,16 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
         } else {
+            val dest = notificationDestination(type, contentType)
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                dest?.let { putExtra("destination", it) }
             }
         }
 
+        val requestCode = if (!url.isNullOrBlank()) url.hashCode() else (type + contentType).hashCode()
         val pendingIntent = PendingIntent.getActivity(
-            this, url?.hashCode() ?: 0, intent,
+            this, requestCode, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -82,6 +87,17 @@ class MokusorsFirebaseMessagingService : FirebaseMessagingService() {
             .build()
 
         manager.notify(System.currentTimeMillis().toInt(), notification)
+    }
+
+    private fun notificationDestination(type: String, contentType: String): String? = when {
+        type == "program-created" || contentType == "program" -> "registrations"
+        type == "dataSheet-created" || contentType == "dataSheet" -> "datasheets"
+        type == "resume-created" || contentType == "resume" -> "resumes"
+        type.startsWith("offer") || contentType == "offer" -> "marketplace"
+        type.contains("document") || contentType == "document" -> "documents"
+        type.contains("inventory") || contentType == "inventory" -> "inventory"
+        type.startsWith("deadline-task") -> "tasks"
+        else -> null
     }
 
     companion object {

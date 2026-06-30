@@ -45,8 +45,13 @@ import hu.szabonorbert.mokusors.ui.theme.MokusorsTheme
 import hu.szabonorbert.mokusors.viewmodel.AuthState
 import hu.szabonorbert.mokusors.viewmodel.AuthViewModel
 import hu.szabonorbert.mokusors.viewmodel.EventViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        val pendingDestination = MutableStateFlow<String?>(null)
+    }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -56,6 +61,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermission()
+        intent?.getStringExtra("destination")?.let { pendingDestination.value = it }
         setContent {
             val prefs = remember { getSharedPreferences("widget_prefs", Context.MODE_PRIVATE) }
             val systemDark = isSystemInDarkTheme()
@@ -80,6 +86,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("destination")?.let { pendingDestination.value = it }
     }
 
     override fun onDestroy() {
@@ -127,9 +138,19 @@ fun MokusorsApp(
     var updateRequired by remember { mutableStateOf(false) }
     var updateStoreUrl by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val pendingDestination by MainActivity.pendingDestination.collectAsState()
 
     LaunchedEffect(adminResolved, isAdmin) {
         if (adminResolved) onRoleResolved(isAdmin)
+    }
+
+    LaunchedEffect(adminResolved, pendingDestination) {
+        val dest = pendingDestination ?: return@LaunchedEffect
+        if (!adminResolved) return@LaunchedEffect
+        navController.navigate(dest) {
+            popUpTo("calendar") { inclusive = false }
+        }
+        MainActivity.pendingDestination.value = null
     }
 
     LaunchedEffect(authState) {
