@@ -289,7 +289,7 @@ fun CalendarScreen(
                 selectedDayEvents = selectedDayEvents,
                 isAdmin = isAdmin,
                 appColors = appColors,
-                widgetShowTasks = widgetShowTasks.value,
+                widgetShowTasks = isAdmin && widgetShowTasks.value,
                 allTasks = allTasks
             )
         }
@@ -901,8 +901,7 @@ fun EventRow(
                 }
                 if (isAdmin && !compact) {
                     if (event.hasTodoList) {
-                        Text("${event.completedTaskCount}/${event.totalTaskCount} kész",
-                            fontSize = 13.sp, color = color)
+                        ChecklistBadges(event)
                     }
                     if (event.visibleToUsers) {
                         Box(
@@ -915,6 +914,48 @@ fun EventRow(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChecklistBadges(event: CalendarEvent) {
+    val items = event.activeActivities.map { key ->
+        when (key) {
+            "dtk"         -> Pair("Részvétel",        event.dtkParticipationDone)
+            "kk"          -> Pair("KK engedély",      event.kkPermissionDone)
+            "press"       -> Pair("Sajtómeghívó",     event.pressInviteDone)
+            "ph"          -> Pair("PH háttéranyag",   event.phBackgroundDone)
+            "catering"    -> Pair("Catering",         event.cateringDone)
+            "gifts"       -> Pair("Ajándékok",        event.giftsDone)
+            "certificate" -> Pair("Oklevél / emléklap", event.certificateDone)
+            else          -> Pair(key,                false)
+        }
+    }
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items.forEach { (label, done) ->
+            val tint = if (done) Color(0xFF34C759) else Color(0xFFFF3B30)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(tint.copy(alpha = 0.10f))
+                    .border(1.dp, tint.copy(alpha = 0.30f), RoundedCornerShape(50))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = if (done) Icons.Filled.CheckCircle else Icons.Filled.Cancel,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = tint)
             }
         }
     }

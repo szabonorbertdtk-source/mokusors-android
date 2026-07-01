@@ -179,7 +179,7 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                     )
                 }.filter { sheet ->
                     isAdmin || sheet.targetUsers.isEmpty() || sheet.targetUsers.contains(uid)
-                }.sortedWith(compareBy({ it.status != "open" }, { it.deadline.ifEmpty { "9999" } }))
+                }.sortedWith(compareBy({ it.deadline.ifEmpty { "9999" } }))
                 if (selectedSheetId == null && sheets.isNotEmpty()) {
                     selectedSheetId = sheets.first().id
                 }
@@ -398,10 +398,7 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
             // Sheet picker — vertical cards (iOS style)
             items(sheets) { sheet ->
                 val isSelected = sheet.id == (selectedSheet?.id)
-                val isOpen = sheet.status == "open"
-                val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
-                val statusLabel = if (isOpen) "Nyitott" else "Lezárt"
-                val statusColor = if (isOpen) Color(0xFF34C759) else Color(0xFF8E8E93)
+                val accentColor = blue
 
                 Box(
                     modifier = Modifier
@@ -451,11 +448,6 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                                             fontWeight = FontWeight.Bold, color = Color.White)
                                     }
                                 }
-                                if (!isOpen) {
-                                    Icon(Icons.Default.Lock, null,
-                                        tint = Color(0xFF8E8E93),
-                                        modifier = Modifier.size(14.dp))
-                                }
                             }
                             if (sheet.deadlineFormatted.isNotBlank()) {
                                 Text("Határidő: ${sheet.deadlineFormatted}", fontSize = 13.sp,
@@ -466,12 +458,6 @@ fun DataSheetsScreen(isAdmin: Boolean = false, onBack: () -> Unit) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        Text(
-                            statusLabel,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor
-                        )
                     }
                 }
             }
@@ -578,8 +564,7 @@ private fun SheetFormCard(
     onValueChange: (String, String) -> Unit,
     onSave: () -> Unit
 ) {
-    val isOpen = sheet.status == "open"
-    val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
+    val accentColor = blue
     val hasSavedData = ownValues.values.any { it.isNotBlank() }
 
     val deadlineDaysLeft = remember(sheet.deadline) {
@@ -607,25 +592,7 @@ private fun SheetFormCard(
                 verticalAlignment = Alignment.Top
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                            modifier = Modifier.weight(1f, fill = false))
-                        // Status badge
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(accentColor.copy(alpha = 0.12f))
-                                .padding(horizontal = 7.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                if (isOpen) "Nyitott" else "Lezárt",
-                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor
-                            )
-                        }
-                    }
+                    Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     if (sheet.description.isNotBlank()) {
                         Text(sheet.description, fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -640,7 +607,7 @@ private fun SheetFormCard(
                             else -> "Határidő: $formatted (${deadlineDaysLeft} nap)"
                         }
                         val deadlineColor = when {
-                            deadlineDaysLeft == null || !isOpen -> accentColor
+                            deadlineDaysLeft == null -> accentColor
                             deadlineDaysLeft <= 3 -> Color(0xFFFF3B30)
                             deadlineDaysLeft <= 7 -> Color(0xFFFF9500)
                             else -> accentColor
@@ -653,22 +620,6 @@ private fun SheetFormCard(
                     Spacer(Modifier.width(8.dp))
                     Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF34C759),
                         modifier = Modifier.size(22.dp).padding(top = 2.dp))
-                }
-            }
-
-            if (!isOpen) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF8E8E93).copy(alpha = 0.10f))
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.Lock, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(15.dp))
-                    Text("Ez az adatszolgáltatás lezárva.", fontSize = 13.sp,
-                        color = Color(0xFF8E8E93), fontWeight = FontWeight.Medium)
                 }
             }
 
@@ -685,7 +636,7 @@ private fun SheetFormCard(
                     FieldInput(
                         field = field,
                         value = ownValues[field.id] ?: "",
-                        enabled = isOpen,
+                        enabled = true,
                         accentColor = accentColor,
                         onValueChange = { onValueChange(field.id, it) }
                     )
@@ -693,7 +644,7 @@ private fun SheetFormCard(
             }
 
             // Save button
-            if (isOpen && sheet.fields.isNotEmpty()) {
+            if (sheet.fields.isNotEmpty()) {
                 Button(
                     onClick = onSave,
                     enabled = !isSaving,
@@ -885,8 +836,7 @@ private fun MultiRowSheetCard(
     onValueChange: (String, String) -> Unit,
     onSave: () -> Unit
 ) {
-    val isOpen = sheet.status == "open"
-    val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
+    val accentColor = blue
     val deadlineDaysLeft = remember(sheet.deadline) {
         if (sheet.deadline.isBlank()) null
         else try {
@@ -911,22 +861,7 @@ private fun MultiRowSheetCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                            modifier = Modifier.weight(1f, fill = false))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(accentColor.copy(alpha = 0.12f))
-                                .padding(horizontal = 7.dp, vertical = 3.dp)
-                        ) {
-                            Text(if (isOpen) "Nyitott" else "Lezárt",
-                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor)
-                        }
-                    }
+                    Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     if (sheet.description.isNotBlank()) {
                         Text(sheet.description, fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -941,7 +876,7 @@ private fun MultiRowSheetCard(
                             else -> "Határidő: $formatted (${deadlineDaysLeft} nap)"
                         }
                         val deadlineColor = when {
-                            deadlineDaysLeft == null || !isOpen -> accentColor
+                            deadlineDaysLeft == null -> accentColor
                             deadlineDaysLeft <= 3 -> Color(0xFFFF3B30)
                             deadlineDaysLeft <= 7 -> Color(0xFFFF9500)
                             else -> accentColor
@@ -950,26 +885,10 @@ private fun MultiRowSheetCard(
                             fontWeight = FontWeight.Medium, color = deadlineColor)
                     }
                 }
-                if (isOpen && editingId == null) {
+                if (editingId == null) {
                     IconButton(onClick = onStartNew) {
                         Icon(Icons.Default.Add, contentDescription = "Új sor", tint = accentColor)
                     }
-                }
-            }
-
-            if (!isOpen) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF8E8E93).copy(alpha = 0.10f))
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.Lock, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(15.dp))
-                    Text("Ez az adatszolgáltatás lezárva.", fontSize = 13.sp,
-                        color = Color(0xFF8E8E93), fontWeight = FontWeight.Medium)
                 }
             }
 
@@ -1044,21 +963,19 @@ private fun MultiRowSheetCard(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                             }
                         }
-                        if (isOpen) {
-                            Row {
-                                IconButton(onClick = { onStartEdit(row) }) {
-                                    Icon(Icons.Default.Edit, null, tint = accentColor,
-                                        modifier = Modifier.size(20.dp))
-                                }
-                                IconButton(onClick = { onDelete(row) }) {
-                                    Icon(Icons.Default.Delete, null, tint = Color(0xFFFF3B30),
-                                        modifier = Modifier.size(20.dp))
-                                }
+                        Row {
+                            IconButton(onClick = { onStartEdit(row) }) {
+                                Icon(Icons.Default.Edit, null, tint = accentColor,
+                                    modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = { onDelete(row) }) {
+                                Icon(Icons.Default.Delete, null, tint = Color(0xFFFF3B30),
+                                    modifier = Modifier.size(20.dp))
                             }
                         }
                     }
                 }
-                if (isOpen && ownRowLoaded) {
+                if (ownRowLoaded) {
                     Button(
                         onClick = onStartNew,
                         modifier = Modifier.fillMaxWidth(),
@@ -1084,14 +1001,15 @@ private fun AdminSheetCard(
     blue: Color,
     onViewSubmission: (AdminSheetSubmission) -> Unit
 ) {
-    val isOpen = sheet.status == "open"
-    val accentColor = if (isOpen) blue else Color(0xFF8E8E93)
+    val accentColor = blue
     var isExpanded by remember(sheet.id) { mutableStateOf(true) }
 
+    val targetedUsers = if (sheet.targetUsers.isNotEmpty())
+        users.filter { u -> u.id in sheet.targetUsers } else users
     val submittedUserIds = submissions.map { it.userId }.toSet()
-    val usersLoaded = users.isNotEmpty()
-    val submittedCount = if (usersLoaded) users.count { u -> u.id in submittedUserIds } else submissions.size
-    val total = if (usersLoaded) users.size else null
+    val usersLoaded = targetedUsers.isNotEmpty()
+    val submittedCount = if (usersLoaded) targetedUsers.count { u -> u.id in submittedUserIds } else submissions.size
+    val total = if (usersLoaded) targetedUsers.size else null
 
     val isoFmt = remember {
         java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
@@ -1119,24 +1037,7 @@ private fun AdminSheetCard(
                 verticalAlignment = Alignment.Top
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                            modifier = Modifier.weight(1f, fill = false))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(accentColor.copy(alpha = 0.12f))
-                                .padding(horizontal = 7.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                if (isOpen) "Nyitott" else "Lezárt",
-                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor
-                            )
-                        }
-                    }
+                    Text(sheet.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     if (sheet.description.isNotBlank()) {
                         Text(sheet.description, fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1201,10 +1102,10 @@ private fun AdminSheetCard(
                 ) {
                     Column {
                         if (usersLoaded) {
-                            // Show all users with submitted/not status
-                            users.forEachIndexed { index, user ->
+                            // Show all targeted users with submitted/not status
+                            targetedUsers.forEachIndexed { index, user ->
                                 val submission = submissions.firstOrNull { it.userId == user.id }
-                                val isLast = index == users.lastIndex
+                                val isLast = index == targetedUsers.lastIndex
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
